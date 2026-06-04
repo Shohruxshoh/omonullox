@@ -1,0 +1,11 @@
+telethon
+redis[asyncio]
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+alembic
+python-dotenv
+python-multipart
+cryptography
+slowapi

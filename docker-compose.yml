@@ -1,0 +1,79 @@
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-postapi}
+      POSTGRES_USER: ${POSTGRES_USER:-postapi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postapi} -d ${POSTGRES_DB:-postapi}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app_net
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD} --bind 0.0.0.0 --protected-mode no
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - app_net
+
+  # ── FastAPI App ─────────────────────────────────────────────────────────────
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postapi}:${POSTGRES_PASSWORD:-secret123}@postgres:5432/${POSTGRES_DB:-postapi}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    ports:
+      - "20165:8000"
+    volumes:
+      - ./sessions:/app/sessions:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app_net
+
+  # ── Session Uploader (bir martalik) ─────────────────────────────────────────
+  # Ishlatish: docker compose run --rm uploader
+  uploader:
+    build: .
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    volumes:
+      - ./sessions:/app/sessions:ro
+    command: python upload_sessions.py
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app_net
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+  redis_data:
+
+
+networks:
+  app_net:
+    driver: bridge

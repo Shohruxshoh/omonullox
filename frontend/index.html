@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Post API Frontend</title>
+  <link rel="stylesheet" href="/frontend/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">Telegram Post Service</p>
+      <h1>Views, reactions va shares</h1>
+    </div>
+    <div class="header-actions">
+      <div id="user-chip" class="user-chip" hidden>
+        <span id="current-user"></span>
+        <button id="logout-btn" type="button">Chiqish</button>
+      </div>
+      <a class="docs-link" href="/docs">API docs</a>
+    </div>
+  </header>
+
+  <section id="login-panel" class="login-panel panel">
+    <div>
+      <p class="eyebrow">Login</p>
+      <h2>Tizimga kirish</h2>
+      <p>Views, reactions va shares panelidan foydalanish uchun login qiling.</p>
+    </div>
+    <form id="login-form" class="login-form">
+      <label class="field">
+        <span>Username</span>
+        <input id="username" name="username" type="text" autocomplete="username" required placeholder="admin">
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Parol">
+      </label>
+      <button id="login-btn" class="primary-btn" type="submit">Kirish</button>
+    </form>
+  </section>
+
+  <main id="app-shell" class="shell" hidden>
+    <section class="panel task-panel">
+      <div class="panel-head">
+        <div>
+          <h2>Task yuborish</h2>
+          <p>Faqat views, reactions va shares endpointlari uchun.</p>
+        </div>
+      </div>
+
+      <form id="task-form" class="task-form">
+        <label class="field">
+          <span>API key</span>
+          <input id="api-key" name="apiKey" type="password" autocomplete="off" placeholder="Login qilinganda avtomatik olinadi" readonly>
+        </label>
+
+        <label class="field">
+          <span>Post link</span>
+          <input id="post-link" name="postLink" type="url" required placeholder="https://t.me/channel/123">
+        </label>
+
+        <fieldset class="service-picker">
+          <legend>Service</legend>
+          <label class="service-option">
+            <input type="radio" name="service" value="views" checked>
+            <span>Views</span>
+            <small>Postga view yuborish</small>
+          </label>
+          <label class="service-option">
+            <input type="radio" name="service" value="reactions">
+            <span>Reactions</span>
+            <small>Emoji reaction yuborish</small>
+          </label>
+          <label class="service-option">
+            <input type="radio" name="service" value="shares">
+            <span>Shares</span>
+            <small>Postni share qilish</small>
+          </label>
+        </fieldset>
+
+        <div id="reaction-field" class="reaction-field" hidden>
+          <label class="field">
+            <span>Reaction emoji</span>
+            <input id="reaction" name="reaction" type="text" maxlength="8" value="👍" inputmode="text">
+          </label>
+          <div class="emoji-row" aria-label="Tez emoji tanlash">
+            <button type="button" data-emoji="👍">👍</button>
+            <button type="button" data-emoji="❤️">❤️</button>
+            <button type="button" data-emoji="🔥">🔥</button>
+            <button type="button" data-emoji="👏">👏</button>
+            <button type="button" data-emoji="😁">😁</button>
+          </div>
+        </div>
+
+        <label class="field">
+          <span>Accounts limiti</span>
+          <input id="accounts" name="accounts" type="number" min="1" step="1" placeholder="Bo'sh qoldirilsa barcha akkauntlar">
+        </label>
+
+        <button id="submit-btn" class="primary-btn" type="submit">Task yaratish</button>
+      </form>
+    </section>
+
+    <aside class="panel status-panel">
+      <div class="panel-head">
+        <div>
+          <h2>Holat</h2>
+          <p>Navbat va kuzatilayotgan tasklar.</p>
+        </div>
+        <button id="refresh-btn" class="ghost-btn" type="button">Yangilash</button>
+      </div>
+      <div class="metrics">
+        <div>
+          <span id="queue-count">0</span>
+          <small>Navbatda</small>
+        </div>
+        <div>
+          <span id="tracked-count">0</span>
+          <small>Kuzatilmoqda</small>
+        </div>
+      </div>
+      <div id="last-result" class="result-box" hidden></div>
+    </aside>
+
+    <section id="system-panel" class="panel wide-panel" hidden>
+      <div class="panel-head">
+        <div>
+          <h2>Tizim himoyasi</h2>
+          <p>Circuit breaker va parallel account limitini admin boshqaradi.</p>
+        </div>
+        <button id="system-refresh-btn" class="ghost-btn" type="button">Yangilash</button>
+      </div>
+
+      <div class="system-grid">
+        <div class="system-card">
+          <span id="system-paused">-</span>
+          <small>Circuit breaker</small>
+        </div>
+        <div class="system-card">
+          <span id="system-errors">0</span>
+          <small>So'nggi xatolar</small>
+        </div>
+        <div class="system-card">
+          <span id="system-queue">0</span>
+          <small>Navbat</small>
+        </div>
+        <form id="parallel-form" class="system-form">
+          <label class="field">
+            <span>Parallel accounts</span>
+            <input id="parallel-accounts" type="number" min="1" max="5000" step="1" value="400">
+          </label>
+          <button id="parallel-save-btn" class="primary-btn" type="submit">Saqlash</button>
+        </form>
+      </div>
+
+      <div id="system-reason" class="result-box" hidden></div>
+      <div class="system-actions">
+        <button id="system-resume-btn" class="primary-btn" type="button">Tizimni davom ettirish</button>
+      </div>
+    </section>
+
+    <section id="session-panel" class="panel wide-panel" hidden>
+      <div class="panel-head">
+        <div>
+          <h2>Sessionlarni DBga yuklash</h2>
+          <p>Admin uchun: JSON yoki CSV sessionlar `telegram_sessions` jadvaliga saqlanadi.</p>
+        </div>
+        <button id="session-stats-btn" class="ghost-btn" type="button">Statistika</button>
+      </div>
+
+      <div class="session-stats" aria-label="Session statistikasi">
+        <div>
+          <span id="session-total">0</span>
+          <small>Umumiy</small>
+        </div>
+        <div>
+          <span id="session-active">0</span>
+          <small>Active</small>
+        </div>
+        <div>
+          <span id="session-banned">0</span>
+          <small>Ban</small>
+        </div>
+        <div>
+          <span id="session-flood">0</span>
+          <small>Flood</small>
+        </div>
+        <div>
+          <span id="session-sleep">0</span>
+          <small>Sleep</small>
+        </div>
+      </div>
+
+      <div class="session-grid">
+        <form id="session-raw-form" class="upload-form raw-session-form">
+          <label class="field">
+            <span>StringSession qatorlari</span>
+            <textarea id="session-raw-text" rows="8" placeholder="Har qatorda bitta session string"></textarea>
+          </label>
+          <div class="mini-grid">
+            <label class="field">
+              <span>api_id</span>
+              <input id="session-raw-api-id" type="number" value="2040" readonly>
+            </label>
+            <label class="field">
+              <span>api_hash</span>
+              <input id="session-raw-api-hash" type="text" value="b18441a1ff607e10a989891a5462e627" readonly>
+            </label>
+          </div>
+          <label class="check-row">
+            <input id="session-raw-update" type="checkbox" checked>
+            <span>Mavjud session bo'lsa yangilash</span>
+          </label>
+          <button id="session-raw-btn" class="primary-btn" type="submit">Session qatorlarini DBga yuklash</button>
+        </form>
+
+        <form id="session-json-form" class="upload-form">
+          <label class="field">
+            <span>JSON session fayllar</span>
+            <input id="session-json-files" type="file" accept=".json,application/json" multiple>
+          </label>
+          <label class="check-row">
+            <input id="session-json-update" type="checkbox" checked>
+            <span>Mavjud uid bo'lsa yangilash</span>
+          </label>
+          <button id="session-json-btn" class="primary-btn" type="submit">JSONni DBga yuklash</button>
+        </form>
+
+        <form id="session-csv-form" class="upload-form">
+          <label class="field">
+            <span>CSV/TXT session fayl</span>
+            <input id="session-csv-file" type="file" accept=".csv,.txt,text/csv,text/plain">
+          </label>
+          <label class="check-row">
+            <input id="session-csv-update" type="checkbox" checked>
+            <span>Mavjud uid bo'lsa yangilash</span>
+          </label>
+          <button id="session-csv-btn" class="primary-btn" type="submit">Faylni DBga yuklash</button>
+        </form>
+
+        <form id="session-folder-form" class="upload-form">
+          <label class="field">
+            <span>Serverdagi papka</span>
+            <input id="session-folder" type="text" value="sessions" placeholder="sessions">
+          </label>
+          <label class="check-row">
+            <input id="session-folder-clear" type="checkbox">
+            <span>Avval DB sessionlarini tozalash</span>
+          </label>
+          <button id="session-folder-btn" class="primary-btn" type="submit">Papkadan DBga yuklash</button>
+        </form>
+      </div>
+
+      <div id="session-result" class="result-box" hidden></div>
+    </section>
+
+    <section class="panel wide-panel">
+      <div class="panel-head">
+        <div>
+          <h2>Kuzatilayotgan tasklar</h2>
+          <p>Yangi tasklar avtomatik yangilanadi.</p>
+        </div>
+        <button id="clear-finished-btn" class="ghost-btn" type="button">Tugaganlarni tozalash</button>
+      </div>
+      <div id="active-list" class="task-list"></div>
+    </section>
+
+    <section class="panel wide-panel">
+      <div class="panel-head">
+        <div>
+          <h2>So'nggi tasklar</h2>
+          <p>API dagi oxirgi views, reactions va shares yozuvlari.</p>
+        </div>
+      </div>
+      <div id="recent-list" class="task-list"></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="/frontend/app.js"></script>
+</body>
+</html>
