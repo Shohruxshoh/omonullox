@@ -470,7 +470,10 @@ app.mount("/frontend", StaticFiles(directory=FRONTEND_DIR), name="frontend")
 
 @app.get("/", include_in_schema=False)
 async def frontend_root():
-    return FileResponse(os.path.join(FRONTEND_DIR, "index.html"))
+    return FileResponse(
+        os.path.join(FRONTEND_DIR, "index.html"),
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════════

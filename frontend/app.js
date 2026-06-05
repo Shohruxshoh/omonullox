@@ -555,15 +555,14 @@ async function copyApiKey() {
   }
 
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(apiKey);
-    } else {
-      copyTextFallback(apiKey);
-    }
+    copyTextFallback(apiKey);
     showToast("API key nusxalandi.");
   } catch (error) {
     try {
-      copyTextFallback(apiKey);
+      if (!navigator.clipboard?.writeText) {
+        throw error;
+      }
+      await navigator.clipboard.writeText(apiKey);
       showToast("API key nusxalandi.");
     } catch {
       showToast("API keyni nusxalab bo'lmadi.", true);
@@ -572,16 +571,23 @@ async function copyApiKey() {
 }
 
 function copyTextFallback(text) {
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  textarea.style.pointerEvents = "none";
-  document.body.appendChild(textarea);
-  textarea.select();
+  const input = document.createElement("input");
+  input.type = "text";
+  input.value = text;
+  input.setAttribute("readonly", "");
+  input.style.position = "fixed";
+  input.style.top = "0";
+  input.style.left = "0";
+  input.style.width = "1px";
+  input.style.height = "1px";
+  input.style.opacity = "0";
+  input.style.pointerEvents = "none";
+  document.body.appendChild(input);
+  input.focus({ preventScroll: true });
+  input.select();
+  input.setSelectionRange(0, input.value.length);
   const copied = document.execCommand("copy");
-  document.body.removeChild(textarea);
+  document.body.removeChild(input);
   if (!copied) {
     throw new Error("Copy failed");
   }
