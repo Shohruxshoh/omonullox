@@ -9,6 +9,8 @@ const state = {
   currentUser: null,
   trackedIds: loadTrackedIds(),
   trackedTasks: new Map(),
+  apiKeyRevealTimer: null,
+  copyButtonTimer: null,
 };
 
 const el = {
@@ -555,42 +557,79 @@ async function copyApiKey() {
   }
 
   try {
-    copyTextFallback(apiKey);
+    copyApiKeyFromField();
+    flashCopyButton("Copied");
     showToast("API key nusxalandi.");
   } catch (error) {
     try {
-      if (!navigator.clipboard?.writeText) {
+      if (!window.isSecureContext || !navigator.clipboard?.writeText) {
         throw error;
       }
       await navigator.clipboard.writeText(apiKey);
+      flashCopyButton("Copied");
       showToast("API key nusxalandi.");
     } catch {
-      showToast("API keyni nusxalab bo'lmadi.", true);
+      selectApiKeyForManualCopy();
+      showToast("API key tanlandi. Ctrl+C bosing.", true);
     }
   }
 }
 
-function copyTextFallback(text) {
-  const input = document.createElement("input");
-  input.type = "text";
-  input.value = text;
-  input.setAttribute("readonly", "");
-  input.style.position = "fixed";
-  input.style.top = "0";
-  input.style.left = "0";
-  input.style.width = "1px";
-  input.style.height = "1px";
-  input.style.opacity = "0";
-  input.style.pointerEvents = "none";
-  document.body.appendChild(input);
-  input.focus({ preventScroll: true });
-  input.select();
-  input.setSelectionRange(0, input.value.length);
-  const copied = document.execCommand("copy");
-  document.body.removeChild(input);
+function copyApiKeyFromField() {
+  const originalType = el.apiKey.type;
+  const wasReadonly = el.apiKey.hasAttribute("readonly");
+  let copied = false;
+
+  window.clearTimeout(state.apiKeyRevealTimer);
+  try {
+    el.apiKey.type = "text";
+    if (wasReadonly) {
+      el.apiKey.removeAttribute("readonly");
+    }
+    focusApiKey();
+    el.apiKey.select();
+    el.apiKey.setSelectionRange(0, el.apiKey.value.length);
+    copied = document.execCommand("copy");
+  } finally {
+    el.apiKey.type = originalType;
+    if (wasReadonly) {
+      el.apiKey.setAttribute("readonly", "");
+    }
+    el.apiKey.blur();
+  }
+
   if (!copied) {
     throw new Error("Copy failed");
   }
+}
+
+function selectApiKeyForManualCopy() {
+  window.clearTimeout(state.apiKeyRevealTimer);
+  el.apiKey.type = "text";
+  focusApiKey();
+  el.apiKey.select();
+  el.apiKey.setSelectionRange(0, el.apiKey.value.length);
+  flashCopyButton("Ctrl+C");
+  state.apiKeyRevealTimer = window.setTimeout(() => {
+    el.apiKey.type = "password";
+    el.apiKey.blur();
+  }, 12000);
+}
+
+function focusApiKey() {
+  try {
+    el.apiKey.focus({ preventScroll: true });
+  } catch {
+    el.apiKey.focus();
+  }
+}
+
+function flashCopyButton(text) {
+  window.clearTimeout(state.copyButtonTimer);
+  el.copyApiKey.textContent = text;
+  state.copyButtonTimer = window.setTimeout(() => {
+    el.copyApiKey.textContent = "Copy";
+  }, 1800);
 }
 
 async function submitTask(event) {
