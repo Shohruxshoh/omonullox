@@ -49,6 +49,7 @@ const el = {
   sessionResult: document.querySelector("#session-result"),
   form: document.querySelector("#task-form"),
   apiKey: document.querySelector("#api-key"),
+  copyApiKey: document.querySelector("#copy-api-key-btn"),
   postLink: document.querySelector("#post-link"),
   accounts: document.querySelector("#accounts"),
   reaction: document.querySelector("#reaction"),
@@ -89,7 +90,9 @@ document.querySelectorAll("[data-emoji]").forEach((button) => {
 
 el.apiKey.addEventListener("input", () => {
   localStorage.setItem(apiKeyStorage, el.apiKey.value.trim());
+  syncApiKeyCopyState();
 });
+el.copyApiKey.addEventListener("click", copyApiKey);
 
 el.loginForm.addEventListener("submit", submitLogin);
 el.logout.addEventListener("click", logout);
@@ -106,6 +109,7 @@ el.refresh.addEventListener("click", refreshDashboard);
 el.clearFinished.addEventListener("click", clearFinishedTasks);
 
 syncServiceFields();
+syncApiKeyCopyState();
 initializeAuth();
 setInterval(() => {
   if (state.authToken) refreshTrackedTasks();
@@ -195,6 +199,7 @@ function setLoggedIn(user) {
     el.apiKey.value = user.api_key;
     localStorage.setItem(apiKeyStorage, user.api_key);
   }
+  syncApiKeyCopyState();
   el.loginPanel.hidden = true;
   el.appShell.hidden = false;
   el.userChip.hidden = false;
@@ -213,6 +218,7 @@ function setLoggedOut() {
   localStorage.removeItem(authTokenStorage);
   localStorage.removeItem(apiKeyStorage);
   el.apiKey.value = "";
+  syncApiKeyCopyState();
   el.loginPanel.hidden = false;
   el.appShell.hidden = true;
   el.userChip.hidden = true;
@@ -535,6 +541,50 @@ function selectedService() {
 
 function syncServiceFields() {
   el.reactionField.hidden = selectedService() !== "reactions";
+}
+
+function syncApiKeyCopyState() {
+  el.copyApiKey.disabled = !el.apiKey.value.trim();
+}
+
+async function copyApiKey() {
+  const apiKey = el.apiKey.value.trim();
+  if (!apiKey) {
+    showToast("API key hali olinmagan.", true);
+    return;
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(apiKey);
+    } else {
+      copyTextFallback(apiKey);
+    }
+    showToast("API key nusxalandi.");
+  } catch (error) {
+    try {
+      copyTextFallback(apiKey);
+      showToast("API key nusxalandi.");
+    } catch {
+      showToast("API keyni nusxalab bo'lmadi.", true);
+    }
+  }
+}
+
+function copyTextFallback(text) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!copied) {
+    throw new Error("Copy failed");
+  }
 }
 
 async function submitTask(event) {

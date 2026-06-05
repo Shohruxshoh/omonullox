@@ -50,10 +50,13 @@
       </div>
 
       <form id="task-form" class="task-form">
-        <label class="field">
-          <span>API key</span>
-          <input id="api-key" name="apiKey" type="password" autocomplete="off" placeholder="Login qilinganda avtomatik olinadi" readonly>
-        </label>
+        <div class="field">
+          <label for="api-key">API key</label>
+          <div class="copy-field">
+            <input id="api-key" name="apiKey" type="password" autocomplete="off" placeholder="Login qilinganda avtomatik olinadi" readonly>
+            <button id="copy-api-key-btn" class="copy-btn" type="button" aria-label="API keyni nusxalash" title="API keyni nusxalash">Copy</button>
+          </div>
+        </div>
 
         <label class="field">
           <span>Post link</span>

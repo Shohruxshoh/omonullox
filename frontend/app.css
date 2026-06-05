@@ -77,6 +77,7 @@ p {
 .docs-link,
 .ghost-btn,
 .primary-btn,
+.copy-btn,
 .emoji-row button,
 .remove-btn,
 .user-chip button {
@@ -284,6 +285,7 @@ p {
 }
 
 .field span,
+.field > label,
 .service-picker legend {
   color: #28362f;
   font-size: 13px;
@@ -311,6 +313,42 @@ input:focus,
 textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(22, 132, 87, 0.14);
+}
+
+.copy-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.copy-field input {
+  border-radius: 8px 0 0 8px;
+}
+
+.copy-field input:focus {
+  position: relative;
+  z-index: 1;
+}
+
+.copy-btn {
+  min-width: 78px;
+  min-height: 44px;
+  padding: 0 14px;
+  color: var(--accent-strong);
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 8px 8px 0;
+  background: var(--accent-soft);
+  font-weight: 800;
+}
+
+.copy-btn:hover {
+  border-color: var(--accent);
+  background: #ffffff;
+}
+
+.copy-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .service-picker {
