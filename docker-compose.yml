@@ -41,7 +41,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postapi}:${POSTGRES_PASSWORD:-secret123}@postgres:5432/${POSTGRES_DB:-postapi}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     ports:
-      - "127.0.0.1:20165:8000"
+      - "127.0.0.1:20201:8000"
     volumes:
       - ./sessions:/app/sessions:ro
     depends_on:
@@ -51,6 +51,30 @@ services:
         condition: service_healthy
     networks:
       - app_net
+
+  # ── Nginx reverse proxy ──────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    depends_on:
+      - app
+    networks:
+      - app_net
+
+  certbot:
+    image: certbot/certbot:latest
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    profiles:
+      - tools
 
   # ── Session Uploader (bir martalik) ─────────────────────────────────────────
   # Ishlatish: docker compose run --rm uploader
@@ -72,6 +96,8 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  letsencrypt:
+  certbot_www:
 
 
 networks:

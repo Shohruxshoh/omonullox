@@ -3,285 +3,568 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Post API Frontend</title>
-  <link rel="stylesheet" href="/frontend/app.css?v=20260605-3">
+  <title>Post API boshqaruv paneli</title>
+  <link rel="stylesheet" href="/frontend/app.css?v=20260606-8">
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <p class="eyebrow">Telegram Post Service</p>
-      <h1>Views, reactions va shares</h1>
-    </div>
-    <div class="header-actions">
-      <div id="user-chip" class="user-chip" hidden>
-        <span id="current-user"></span>
-        <button id="logout-btn" type="button">Chiqish</button>
-      </div>
-      <a class="docs-link" href="/docs">API docs</a>
-    </div>
-  </header>
-
-  <section id="login-panel" class="login-panel panel">
-    <div>
-      <p class="eyebrow">Login</p>
-      <h2>Tizimga kirish</h2>
-      <p>Views, reactions va shares panelidan foydalanish uchun login qiling.</p>
-    </div>
-    <form id="login-form" class="login-form">
-      <label class="field">
-        <span>Username</span>
-        <input id="username" name="username" type="text" autocomplete="username" required placeholder="admin">
-      </label>
-      <label class="field">
-        <span>Password</span>
-        <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="Parol">
-      </label>
-      <button id="login-btn" class="primary-btn" type="submit">Kirish</button>
-    </form>
-  </section>
-
-  <main id="app-shell" class="shell" hidden>
-    <section class="panel task-panel">
-      <div class="panel-head">
+  <div class="app-layout">
+    <aside id="sidebar" class="sidebar" hidden>
+      <div class="brand">
+        <span class="brand-mark">PA</span>
         <div>
-          <h2>Task yuborish</h2>
-          <p>Faqat views, reactions va shares endpointlari uchun.</p>
+          <strong>Post API</strong>
+          <small>Boshqaruv paneli</small>
         </div>
       </div>
 
-      <form id="task-form" class="task-form">
-        <div class="field">
-          <label for="api-key">API key</label>
-          <div class="copy-field">
-            <input id="api-key" name="apiKey" type="password" autocomplete="off" placeholder="Login qilinganda avtomatik olinadi" readonly>
-            <button id="copy-api-key-btn" class="copy-btn" type="button" aria-label="API keyni nusxalash" title="API keyni nusxalash">Copy</button>
-          </div>
-        </div>
+      <nav class="nav-list" aria-label="Asosiy navigatsiya">
+        <button class="nav-link active" data-page-target="dashboard" type="button">
+          <span>01</span> Dashboard
+        </button>
+        <button class="nav-link" data-page-target="tasks" type="button">
+          <span>02</span> Tasklar
+        </button>
+        <button class="nav-link" data-page-target="sponsored" type="button">
+          <span>03</span> Reklama qidiruvi
+        </button>
+        <button class="nav-link admin-only" data-page-target="keys" type="button">
+          <span>04</span> API kalitlar
+        </button>
+        <button class="nav-link admin-only" data-page-target="users" type="button">
+          <span>05</span> Foydalanuvchilar
+        </button>
+        <button class="nav-link admin-only" data-page-target="sessions" type="button">
+          <span>06</span> Sessionlar
+        </button>
+        <button class="nav-link admin-only" data-page-target="system" type="button">
+          <span>07</span> Tizim
+        </button>
+      </nav>
 
-        <label class="field">
-          <span>Post link</span>
-          <input id="post-link" name="postLink" type="url" required placeholder="https://t.me/channel/123">
-        </label>
-
-        <fieldset class="service-picker">
-          <legend>Service</legend>
-          <label class="service-option">
-            <input type="radio" name="service" value="views" checked>
-            <span>Views</span>
-            <small>Postga view yuborish</small>
-          </label>
-          <label class="service-option">
-            <input type="radio" name="service" value="reactions">
-            <span>Reactions</span>
-            <small>Emoji reaction yuborish</small>
-          </label>
-          <label class="service-option">
-            <input type="radio" name="service" value="shares">
-            <span>Shares</span>
-            <small>Postni share qilish</small>
-          </label>
-        </fieldset>
-
-        <div id="reaction-field" class="reaction-field" hidden>
-          <label class="field">
-            <span>Reaction emoji</span>
-            <input id="reaction" name="reaction" type="text" maxlength="8" value="👍" inputmode="text">
-          </label>
-          <div class="emoji-row" aria-label="Tez emoji tanlash">
-            <button type="button" data-emoji="👍">👍</button>
-            <button type="button" data-emoji="❤️">❤️</button>
-            <button type="button" data-emoji="🔥">🔥</button>
-            <button type="button" data-emoji="👏">👏</button>
-            <button type="button" data-emoji="😁">😁</button>
-          </div>
-        </div>
-
-        <label class="field">
-          <span>Accounts limiti</span>
-          <input id="accounts" name="accounts" type="number" min="1" step="1" placeholder="Bo'sh qoldirilsa barcha akkauntlar">
-        </label>
-
-        <button id="submit-btn" class="primary-btn" type="submit">Task yaratish</button>
-      </form>
-    </section>
-
-    <aside class="panel status-panel">
-      <div class="panel-head">
-        <div>
-          <h2>Holat</h2>
-          <p>Navbat va kuzatilayotgan tasklar.</p>
-        </div>
-        <button id="refresh-btn" class="ghost-btn" type="button">Yangilash</button>
+      <div class="sidebar-footer">
+        <a href="/docs" target="_blank" rel="noreferrer">Swagger API docs</a>
+        <button id="logout-btn" class="danger-link" type="button">Tizimdan chiqish</button>
       </div>
-      <div class="metrics">
-        <div>
-          <span id="queue-count">0</span>
-          <small>Navbatda</small>
-        </div>
-        <div>
-          <span id="tracked-count">0</span>
-          <small>Kuzatilmoqda</small>
-        </div>
-      </div>
-      <div id="last-result" class="result-box" hidden></div>
     </aside>
 
-    <section id="system-panel" class="panel wide-panel" hidden>
-      <div class="panel-head">
+    <div class="workspace">
+      <header id="topbar" class="topbar" hidden>
+        <button id="menu-btn" class="icon-btn menu-btn" type="button" aria-label="Menyuni ochish">Menu</button>
         <div>
-          <h2>Tizim himoyasi</h2>
-          <p>Circuit breaker va parallel account limitini admin boshqaradi.</p>
+          <p id="page-eyebrow" class="eyebrow">Umumiy ko'rinish</p>
+          <h1 id="page-title">Dashboard</h1>
         </div>
-        <button id="system-refresh-btn" class="ghost-btn" type="button">Yangilash</button>
-      </div>
-
-      <div class="system-grid">
-        <div class="system-card">
-          <span id="system-paused">-</span>
-          <small>Circuit breaker</small>
-        </div>
-        <div class="system-card">
-          <span id="system-errors">0</span>
-          <small>So'nggi xatolar</small>
-        </div>
-        <div class="system-card">
-          <span id="system-queue">0</span>
-          <small>Navbat</small>
-        </div>
-        <form id="parallel-form" class="system-form">
-          <label class="field">
-            <span>Parallel accounts</span>
-            <input id="parallel-accounts" type="number" min="1" max="5000" step="1" value="400">
-          </label>
-          <button id="parallel-save-btn" class="primary-btn" type="submit">Saqlash</button>
-        </form>
-      </div>
-
-      <div id="system-reason" class="result-box" hidden></div>
-      <div class="system-actions">
-        <button id="system-resume-btn" class="primary-btn" type="button">Tizimni davom ettirish</button>
-      </div>
-    </section>
-
-    <section id="session-panel" class="panel wide-panel" hidden>
-      <div class="panel-head">
-        <div>
-          <h2>Sessionlarni DBga yuklash</h2>
-          <p>Admin uchun: JSON yoki CSV sessionlar `telegram_sessions` jadvaliga saqlanadi.</p>
-        </div>
-        <button id="session-stats-btn" class="ghost-btn" type="button">Statistika</button>
-      </div>
-
-      <div class="session-stats" aria-label="Session statistikasi">
-        <div>
-          <span id="session-total">0</span>
-          <small>Umumiy</small>
-        </div>
-        <div>
-          <span id="session-active">0</span>
-          <small>Active</small>
-        </div>
-        <div>
-          <span id="session-banned">0</span>
-          <small>Ban</small>
-        </div>
-        <div>
-          <span id="session-flood">0</span>
-          <small>Flood</small>
-        </div>
-        <div>
-          <span id="session-sleep">0</span>
-          <small>Sleep</small>
-        </div>
-      </div>
-
-      <div class="session-grid">
-        <form id="session-raw-form" class="upload-form raw-session-form">
-          <label class="field">
-            <span>StringSession qatorlari</span>
-            <textarea id="session-raw-text" rows="8" placeholder="Har qatorda bitta session string"></textarea>
-          </label>
-          <div class="mini-grid">
-            <label class="field">
-              <span>api_id</span>
-              <input id="session-raw-api-id" type="number" value="2040" readonly>
-            </label>
-            <label class="field">
-              <span>api_hash</span>
-              <input id="session-raw-api-hash" type="text" value="b18441a1ff607e10a989891a5462e627" readonly>
-            </label>
+        <div class="topbar-actions">
+          <button id="global-refresh-btn" class="secondary-btn" type="button">Yangilash</button>
+          <div class="user-chip">
+            <span id="current-user">-</span>
+            <small id="current-role">-</small>
           </div>
-          <label class="check-row">
-            <input id="session-raw-update" type="checkbox" checked>
-            <span>Mavjud session bo'lsa yangilash</span>
-          </label>
-          <button id="session-raw-btn" class="primary-btn" type="submit">Session qatorlarini DBga yuklash</button>
-        </form>
-
-        <form id="session-json-form" class="upload-form">
-          <label class="field">
-            <span>JSON session fayllar</span>
-            <input id="session-json-files" type="file" accept=".json,application/json" multiple>
-          </label>
-          <label class="check-row">
-            <input id="session-json-update" type="checkbox" checked>
-            <span>Mavjud uid bo'lsa yangilash</span>
-          </label>
-          <button id="session-json-btn" class="primary-btn" type="submit">JSONni DBga yuklash</button>
-        </form>
-
-        <form id="session-csv-form" class="upload-form">
-          <label class="field">
-            <span>CSV/TXT session fayl</span>
-            <input id="session-csv-file" type="file" accept=".csv,.txt,text/csv,text/plain">
-          </label>
-          <label class="check-row">
-            <input id="session-csv-update" type="checkbox" checked>
-            <span>Mavjud uid bo'lsa yangilash</span>
-          </label>
-          <button id="session-csv-btn" class="primary-btn" type="submit">Faylni DBga yuklash</button>
-        </form>
-
-        <form id="session-folder-form" class="upload-form">
-          <label class="field">
-            <span>Serverdagi papka</span>
-            <input id="session-folder" type="text" value="sessions" placeholder="sessions">
-          </label>
-          <label class="check-row">
-            <input id="session-folder-clear" type="checkbox">
-            <span>Avval DB sessionlarini tozalash</span>
-          </label>
-          <button id="session-folder-btn" class="primary-btn" type="submit">Papkadan DBga yuklash</button>
-        </form>
-      </div>
-
-      <div id="session-result" class="result-box" hidden></div>
-    </section>
-
-    <section class="panel wide-panel">
-      <div class="panel-head">
-        <div>
-          <h2>Kuzatilayotgan tasklar</h2>
-          <p>Yangi tasklar avtomatik yangilanadi.</p>
         </div>
-        <button id="clear-finished-btn" class="ghost-btn" type="button">Tugaganlarni tozalash</button>
-      </div>
-      <div id="active-list" class="task-list"></div>
-    </section>
+      </header>
 
-    <section class="panel wide-panel">
-      <div class="panel-head">
-        <div>
-          <h2>So'nggi tasklar</h2>
-          <p>API dagi oxirgi views, reactions va shares yozuvlari.</p>
+      <main>
+        <section id="auth-page" class="auth-page">
+          <div class="auth-intro">
+            <p class="eyebrow">Telegram Post Service</p>
+            <h1>Tasklar va sessionlarni bitta paneldan boshqaring.</h1>
+            <p>Views, reactions, shares, foydalanuvchilar, API kalitlar va tizim monitoringi uchun to'liq frontend.</p>
+            <div class="auth-points">
+              <span>Priority queue</span>
+              <span>Role-based access</span>
+              <span>Session monitoring</span>
+            </div>
+          </div>
+
+          <div class="auth-card panel">
+            <div class="tabs">
+              <button class="tab-btn active" data-auth-tab="login" type="button">Kirish</button>
+              <button class="tab-btn" data-auth-tab="register" type="button">Ro'yxatdan o'tish</button>
+            </div>
+
+            <form id="login-form" class="stack auth-form">
+              <label class="field">
+                <span>Username</span>
+                <input id="login-username" autocomplete="username" required placeholder="admin">
+              </label>
+              <label class="field">
+                <span>Parol</span>
+                <input id="login-password" type="password" autocomplete="current-password" required placeholder="Parol">
+              </label>
+              <button id="login-submit" class="primary-btn" type="submit">Kirish</button>
+            </form>
+
+            <form id="register-form" class="stack auth-form" hidden>
+              <label class="field">
+                <span>Username</span>
+                <input id="register-username" minlength="3" maxlength="50" autocomplete="username" required>
+              </label>
+              <label class="field">
+                <span>Parol</span>
+                <input id="register-password" type="password" minlength="6" autocomplete="new-password" required>
+              </label>
+              <button id="register-submit" class="primary-btn" type="submit">Hisob yaratish</button>
+            </form>
+          </div>
+        </section>
+
+        <div id="pages" hidden>
+          <section class="page active" data-page="dashboard">
+            <div class="metrics-grid">
+              <article class="metric-card">
+                <small>Navbatda</small>
+                <strong id="dashboard-queue">0</strong>
+                <span>kutilayotgan task</span>
+              </article>
+              <article class="metric-card">
+                <small>Band akkaunt</small>
+                <strong id="dashboard-busy">0</strong>
+                <span id="dashboard-locks-meta">0 ta registrda</span>
+              </article>
+              <article class="metric-card">
+                <small>Mening tasklarim</small>
+                <strong id="dashboard-task-total">0</strong>
+                <span id="dashboard-task-meta">0 ta bajarilgan</span>
+              </article>
+              <article class="metric-card admin-only">
+                <small>Active session</small>
+                <strong id="dashboard-active-sessions">0</strong>
+                <span id="dashboard-session-meta">0 ta jami</span>
+              </article>
+            </div>
+
+            <div class="content-grid">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Tezkor amal</p>
+                    <h2>Yangi task</h2>
+                  </div>
+                </div>
+                <form id="quick-task-form" class="stack">
+                  <label class="field">
+                    <span>Post havolasi</span>
+                    <input id="quick-post-link" type="url" required placeholder="https://t.me/channel/123">
+                  </label>
+                  <div class="form-grid three">
+                    <label class="field">
+                      <span>Service</span>
+                      <select id="quick-service">
+                        <option value="views">Views</option>
+                        <option value="reactions">Reactions</option>
+                        <option value="shares">Shares</option>
+                      </select>
+                    </label>
+                    <label id="quick-reaction-field" class="field" hidden>
+                      <span>Reaction</span>
+                      <input id="quick-reaction" value="👍" maxlength="8">
+                    </label>
+                    <label class="field">
+                      <span>Accounts limiti</span>
+                      <input id="quick-accounts" type="number" min="1" placeholder="Barchasi">
+                    </label>
+                  </div>
+                  <button id="quick-task-submit" class="primary-btn" type="submit">Task yaratish</button>
+                </form>
+                <div id="quick-task-result" class="result-box" hidden></div>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Hisob</p>
+                    <h2>Mening API kalitim</h2>
+                  </div>
+                </div>
+                <div class="copy-field">
+                  <input id="my-api-key" type="password" readonly>
+                  <button id="copy-my-key" class="secondary-btn" type="button">Nusxalash</button>
+                </div>
+                <dl class="details-list">
+                  <div><dt>Username</dt><dd id="profile-username">-</dd></div>
+                  <div><dt>Rol</dt><dd id="profile-role">-</dd></div>
+                  <div><dt>User ID</dt><dd id="profile-id">-</dd></div>
+                </dl>
+              </section>
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">So'nggi faollik</p>
+                  <h2>Mening oxirgi tasklarim</h2>
+                </div>
+                <button class="secondary-btn" data-page-link="tasks" type="button">Barchasini ko'rish</button>
+              </div>
+              <div id="dashboard-task-list" class="task-list"></div>
+            </section>
+          </section>
+
+          <section class="page" data-page="tasks">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Yuborish</p>
+                  <h2>Task yaratish</h2>
+                </div>
+              </div>
+              <form id="task-form" class="form-grid task-create-grid">
+                <label class="field grow">
+                  <span>Post havolasi</span>
+                  <input id="task-post-link" type="url" required placeholder="https://t.me/channel/123">
+                </label>
+                <label class="field">
+                  <span>Service</span>
+                  <select id="task-service">
+                    <option value="views">Views</option>
+                    <option value="reactions">Reactions</option>
+                    <option value="shares">Shares</option>
+                  </select>
+                </label>
+                <label id="task-reaction-field" class="field" hidden>
+                  <span>Reaction</span>
+                  <input id="task-reaction" value="👍" maxlength="8">
+                </label>
+                <label class="field">
+                  <span>Accounts</span>
+                  <input id="task-accounts" type="number" min="1" placeholder="Barchasi">
+                </label>
+                <button id="task-submit" class="primary-btn align-end" type="submit">Yuborish</button>
+              </form>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Tarix</p>
+                  <h2 id="task-table-title">Mening tasklarim</h2>
+                </div>
+                <div class="toolbar">
+                  <label class="field compact">
+                    <span>Ko'rinish</span>
+                    <select id="task-scope">
+                      <option value="mine">Mening tasklarim</option>
+                      <option class="admin-only" value="all">Barcha tasklar</option>
+                    </select>
+                  </label>
+                  <button id="tasks-refresh" class="secondary-btn" type="button">Yangilash</button>
+                </div>
+              </div>
+              <div id="tasks-table"></div>
+              <div class="pagination">
+                <button id="tasks-prev" class="secondary-btn" type="button">Oldingi</button>
+                <span id="tasks-page-label">1-sahifa</span>
+                <button id="tasks-next" class="secondary-btn" type="button">Keyingi</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Tekshirish</p>
+                  <h2>Task statusini ID orqali olish</h2>
+                </div>
+              </div>
+              <form id="status-form" class="form-grid inline-form">
+                <label class="field">
+                  <span>Task ID</span>
+                  <input id="status-task-id" required placeholder="UUID task ID">
+                </label>
+                <button id="status-submit" class="primary-btn align-end" type="submit">Statusni olish</button>
+              </form>
+              <div id="status-result" class="result-box" hidden></div>
+            </section>
+          </section>
+
+          <section class="page" data-page="sponsored">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Telegram Sponsored Search</p>
+                  <h2>Qidiruv key bo'yicha kanal reklamada chiqqanini tekshirish</h2>
+                  <p>Sponsored qidiruv queue'da doim birinchi. Bo'sh sessionlar avval ishlaydi, band sessionlar bo'shashishi bilan qidiruvga o'tadi.</p>
+                </div>
+              </div>
+              <form id="sponsored-search-form" class="form-grid sponsored-search-grid">
+                <label class="field grow">
+                  <span>Qidiruv key</span>
+                  <input id="sponsored-search-key" maxlength="100" required placeholder="Masalan: mosbet">
+                </label>
+                <label class="field grow">
+                  <span>Tekshiriladigan kanal</span>
+                  <input id="sponsored-keyword" maxlength="100" required placeholder="@kanal yoki https://t.me/kanal">
+                </label>
+                <label class="field">
+                  <span>Sessionlar</span>
+                  <input id="sponsored-accounts" type="number" min="1" max="1000" value="1" required>
+                </label>
+                <label class="field">
+                  <span>Parallel session</span>
+                  <input id="sponsored-parallel" type="number" min="1" max="1000" value="5" required>
+                </label>
+                <button id="sponsored-search-submit" class="primary-btn align-end" type="submit">Kanalni tekshirish</button>
+              </form>
+            </section>
+
+            <div id="sponsored-metrics" class="metrics-grid six" hidden>
+              <article class="metric-card"><small>Unique reklama</small><strong id="sponsored-found">0</strong><span>jami natija</span></article>
+              <article class="metric-card"><small>Topgan session</small><strong id="sponsored-sessions-found">0</strong><span>kamida bitta reklama</span></article>
+              <article class="metric-card"><small>Topmagan session</small><strong id="sponsored-sessions-not-found">0</strong><span>natija chiqmadi</span></article>
+              <article class="metric-card"><small>Xatoli session</small><strong id="sponsored-sessions-failed">0</strong><span>blok/flood/auth</span></article>
+              <article class="metric-card"><small>Parallel</small><strong id="sponsored-parallel-used">0</strong><span>bir vaqtdagi session</span></article>
+              <article class="metric-card"><small>Tekshiruv</small><strong id="sponsored-checks">0</strong><span>session tekshiruvi</span></article>
+              <article class="metric-card"><small>Target topgan</small><strong id="sponsored-target-found">0</strong><span>8 taga yetsa to'xtaydi</span></article>
+              <article class="metric-card"><small>Kunlik skip</small><strong id="sponsored-daily-skipped">0</strong><span>keyword bugun ishlatilgan</span></article>
+              <article class="metric-card"><small>Band kutgan</small><strong id="sponsored-busy-waited">0</strong><span>bo'shashgach ishlagan</span></article>
+              <article class="metric-card"><small>Queue kutish</small><strong id="sponsored-queue-wait">0.00s</strong><span>priority 0</span></article>
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Session kesimida</p>
+                  <h2>Qaysi session reklama topdi?</h2>
+                </div>
+              </div>
+              <div id="sponsored-session-results"><p class="empty">Qidiruv hali bajarilmadi.</p></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Natijalar</p>
+                  <h2>Reklama bo'yicha sessionlar taqsimoti</h2>
+                  <p>Har bir reklamani nechta va aynan qaysi session ko'rganini ko'rsatadi.</p>
+                </div>
+                <button id="sponsored-download" class="secondary-btn" type="button" hidden>CSV yuklab olish</button>
+              </div>
+              <div id="sponsored-results"><p class="empty">Qidiruv hali bajarilmadi.</p></div>
+              <div id="sponsored-error-result" class="result-box" hidden></div>
+            </section>
+          </section>
+
+          <section class="page admin-only" data-page="keys">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Admin</p>
+                  <h2>API kalit yaratish</h2>
+                </div>
+              </div>
+              <form id="key-create-form" class="form-grid inline-form">
+                <label class="field">
+                  <span>User ID (ixtiyoriy)</span>
+                  <input id="key-user-id" type="number" min="1" placeholder="Userga biriktirish">
+                </label>
+                <label class="field">
+                  <span>Prioritet</span>
+                  <input id="key-priority" type="number" min="1" max="10000" value="1000" required>
+                </label>
+                <button id="key-create-submit" class="primary-btn align-end" type="submit">Kalit yaratish</button>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Boshqaruv</p>
+                  <h2>API kalitlar</h2>
+                </div>
+                <button id="keys-refresh" class="secondary-btn" type="button">Yangilash</button>
+              </div>
+              <div id="keys-table"></div>
+            </section>
+          </section>
+
+          <section class="page admin-only" data-page="users">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Admin</p>
+                  <h2>Foydalanuvchi yaratish</h2>
+                </div>
+              </div>
+              <form id="user-create-form" class="form-grid inline-form user-form">
+                <label class="field">
+                  <span>Username</span>
+                  <input id="user-username" minlength="3" maxlength="50" required>
+                </label>
+                <label class="field">
+                  <span>Parol</span>
+                  <input id="user-password" type="password" minlength="6" required>
+                </label>
+                <label class="field">
+                  <span>Rol</span>
+                  <select id="user-role">
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </label>
+                <button id="user-create-submit" class="primary-btn align-end" type="submit">User yaratish</button>
+              </form>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Boshqaruv</p>
+                  <h2>Foydalanuvchilar</h2>
+                </div>
+                <button id="users-refresh" class="secondary-btn" type="button">Yangilash</button>
+              </div>
+              <div id="users-table"></div>
+            </section>
+          </section>
+
+          <section class="page admin-only" data-page="sessions">
+            <div class="metrics-grid five">
+              <article class="metric-card"><small>Jami</small><strong id="session-total">0</strong><span>session</span></article>
+              <article class="metric-card"><small>Active</small><strong id="session-active">0</strong><span>ishlaydi</span></article>
+              <article class="metric-card"><small>Sleep</small><strong id="session-sleep">0</strong><span>kutmoqda</span></article>
+              <article class="metric-card"><small>Flood</small><strong id="session-flood">0</strong><span>bloklangan</span></article>
+              <article class="metric-card"><small>Banned</small><strong id="session-banned">0</strong><span>o'chirilgan</span></article>
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Import</p>
+                  <h2>Sessionlarni DBga yuklash</h2>
+                </div>
+                <button id="sessions-refresh" class="secondary-btn" type="button">Statistikani yangilash</button>
+              </div>
+              <div class="import-grid">
+                <form id="session-raw-form" class="subpanel stack">
+                  <h3>StringSession qatorlari</h3>
+                  <label class="field">
+                    <span>Har qatorda bitta session</span>
+                    <textarea id="session-raw-text" rows="8" required></textarea>
+                  </label>
+                  <div class="form-grid two">
+                    <label class="field"><span>API ID</span><input id="session-api-id" type="number" value="2040" required></label>
+                    <label class="field"><span>API hash</span><input id="session-api-hash" value="b18441a1ff607e10a989891a5462e627" required></label>
+                  </div>
+                  <label class="check-field"><input id="session-raw-update" type="checkbox" checked> Mavjudlarini yangilash</label>
+                  <button id="session-raw-submit" class="primary-btn" type="submit">Raw import</button>
+                </form>
+
+                <div class="stack">
+                  <form id="session-json-form" class="subpanel stack">
+                    <h3>JSON fayllar</h3>
+                    <label class="field"><span>Fayllar</span><input id="session-json-files" type="file" accept=".json,application/json" multiple required></label>
+                    <label class="check-field"><input id="session-json-update" type="checkbox" checked> Mavjudlarini yangilash</label>
+                    <button id="session-json-submit" class="primary-btn" type="submit">JSON import</button>
+                  </form>
+                  <form id="session-csv-form" class="subpanel stack">
+                    <h3>CSV yoki TXT fayl</h3>
+                    <label class="field"><span>Fayl</span><input id="session-csv-file" type="file" accept=".csv,.txt,text/csv,text/plain" required></label>
+                    <label class="check-field"><input id="session-csv-update" type="checkbox" checked> Mavjudlarini yangilash</label>
+                    <button id="session-csv-submit" class="primary-btn" type="submit">CSV/TXT import</button>
+                  </form>
+                </div>
+
+                <div class="stack">
+                  <form id="session-folder-form" class="subpanel stack">
+                    <h3>Server papkasi</h3>
+                    <label class="field"><span>Papka yo'li</span><input id="session-folder" value="sessions" required></label>
+                    <label class="check-field"><input id="session-folder-clear" type="checkbox"> Avval DB sessionlarini tozalash</label>
+                    <button id="session-folder-submit" class="primary-btn" type="submit">Papkadan import</button>
+                  </form>
+                  <form id="session-db-form" class="subpanel stack">
+                    <h3>DB sessionlarini tekshirish</h3>
+                    <label class="check-field"><input id="session-db-active" type="checkbox" checked> Faqat active sessionlar</label>
+                    <button id="session-db-submit" class="secondary-btn" type="submit">DB holatini tekshirish</button>
+                  </form>
+                </div>
+              </div>
+              <div id="session-result" class="result-box" hidden></div>
+            </section>
+
+            <section class="panel danger-panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow danger-text">Xavfli amal</p>
+                  <h2>Redis sessionlarini tozalash</h2>
+                  <p>Bu endpoint Redisdagi eski session setini butunlay o'chiradi.</p>
+                </div>
+                <button id="clear-redis-btn" class="danger-btn" type="button">Redisni tozalash</button>
+              </div>
+            </section>
+          </section>
+
+          <section class="page admin-only" data-page="system">
+            <div class="metrics-grid">
+              <article class="metric-card"><small>Circuit breaker</small><strong id="system-state">-</strong><span id="system-reason">Sabab yo'q</span></article>
+              <article class="metric-card"><small>So'nggi xatolar</small><strong id="system-errors">0</strong><span id="system-error-limit">limit: -</span></article>
+              <article class="metric-card"><small>Navbat</small><strong id="system-queue">0</strong><span>task kutmoqda</span></article>
+              <article class="metric-card"><small>Parallel limit</small><strong id="system-parallel">0</strong><span id="system-parallel-default">default: -</span></article>
+            </div>
+
+            <div class="content-grid">
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Sozlama</p>
+                    <h2>Parallel akkauntlar</h2>
+                  </div>
+                </div>
+                <form id="system-settings-form" class="stack">
+                  <label class="field">
+                    <span>Parallel accounts</span>
+                    <input id="system-parallel-input" type="number" min="1" max="5000" required>
+                  </label>
+                  <button id="system-settings-submit" class="primary-btn" type="submit">Saqlash</button>
+                </form>
+              </section>
+
+              <section class="panel">
+                <div class="panel-head">
+                  <div>
+                    <p class="eyebrow">Circuit breaker</p>
+                    <h2>Tizimni davom ettirish</h2>
+                  </div>
+                </div>
+                <p>Pauza va xatolar hisoblagichini tozalab, navbatdagi tasklarni davom ettiradi.</p>
+                <button id="system-resume-btn" class="primary-btn full-btn" type="button">Davom ettirish</button>
+              </section>
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Admin statistika</p>
+                  <h2>API kalitlar bo'yicha tasklar</h2>
+                </div>
+                <button id="system-refresh" class="secondary-btn" type="button">Yangilash</button>
+              </div>
+              <div id="stats-table"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Ma'lumot</p>
+                  <h2>Backend API katalogi</h2>
+                </div>
+              </div>
+              <div id="api-catalog" class="result-box"></div>
+            </section>
+          </section>
         </div>
+      </main>
+    </div>
+  </div>
+
+  <div id="confirm-dialog" class="dialog-backdrop" hidden>
+    <div class="dialog panel" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <h2 id="confirm-title">Tasdiqlash</h2>
+      <p id="confirm-message"></p>
+      <div class="dialog-actions">
+        <button id="confirm-cancel" class="secondary-btn" type="button">Bekor qilish</button>
+        <button id="confirm-ok" class="danger-btn" type="button">Tasdiqlash</button>
       </div>
-      <div id="recent-list" class="task-list"></div>
-    </section>
-  </main>
+    </div>
+  </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-
-  <script src="/frontend/app.js?v=20260605-3"></script>
+  <script src="/frontend/app.js?v=20260607-2"></script>
 </body>
 </html>

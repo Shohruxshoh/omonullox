@@ -34,6 +34,7 @@ import io
 import json
 import os
 import random
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -49,7 +50,13 @@ import redis.asyncio as aioredis
 import uvicorn
 
 from redis_main import RedisSessionManager
-from post_services import SERVICE_MAP, parse_post_link, check_reaction_available, send_reactions_to_post
+from post_services import (
+    SERVICE_MAP,
+    parse_post_link,
+    check_reaction_available,
+    send_reactions_to_post,
+    find_sponsored_peers,
+)
 from account_queue import get_lock, get_stats
 import api_key_store as key_store
 import user_store as users
@@ -63,12 +70,22 @@ from models import TelegramSession
 REDIS_KEY         = os.environ.get("REDIS_KEY", "telegram:sessions:full")
 REDIS_URL         = os.environ.get("REDIS_URL", "redis://localhost:6379")
 DEFAULT_PARALLEL_ACCOUNTS = int(os.environ.get("PARALLEL_ACCOUNTS", "400"))
+SPONSORED_TARGET_STOP_THRESHOLD = max(
+    1,
+    int(os.environ.get("SPONSORED_TARGET_STOP_THRESHOLD", "8")),
+)
+SPONSORED_QUEUE_PRIORITY = 0
 FRONTEND_DIR      = os.path.join(os.path.dirname(__file__), "frontend")
 DEFAULT_SESSION_API_ID = 2040
 DEFAULT_SESSION_API_HASH = "b18441a1ff607e10a989891a5462e627"
 
 # ─── GLOBALS ─────────────────────────────────────────────────────────────────
 task_queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+sponsored_queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
+sponsored_priority_gate = asyncio.Event()
+sponsored_priority_gate.set()
+sponsored_queue_lock = asyncio.Lock()
+priority_start_lock = asyncio.Lock()
 task_status: dict[str, dict] = {}
 def _get_real_ip(request: Request) -> str:
     """Nginx/Cloudflare ortida haqiqiy IP ni oladi."""
@@ -112,6 +129,13 @@ class ReactionTaskRequest(BaseModel):
     post_link: str
     reaction: str          # Yuborish kerak bo'lgan emoji, masalan: "👍"
     accounts: Optional[int] = None
+
+
+class SponsoredSearchRequest(BaseModel):
+    search_key: str = Field(min_length=1, max_length=100)
+    channel_username: str = Field(min_length=1, max_length=100)
+    accounts: int = Field(default=1, ge=1, le=1000)
+    parallel_sessions: int = Field(default=5, ge=1, le=1000)
 
 
 class TaskResponse(BaseModel):
@@ -234,6 +258,64 @@ async def flood_release_loop():
 
 
 # ─── WORKER LOOP ─────────────────────────────────────────────────────────────
+async def sponsored_worker_loop():
+    """Sponsored qidiruvlarni FIFO bajaradi va oddiy tasklardan ustun qo'yadi."""
+    while True:
+        _, queued_at, job_id, job = await sponsored_queue.get()
+        future: asyncio.Future = job["future"]
+        try:
+            task_status[job_id]["status"] = "running"
+            tlog.set_running(job_id, job["req"].accounts)
+            result = await _execute_sponsored_search(
+                job["req"],
+                job["search_key"],
+                job["channel_username"],
+                queue_waited_seconds=max(0, time.time() - queued_at),
+                task_id=job_id,
+            )
+            result["task_id"] = job_id
+            completed = int(result.get("checks_completed") or 0)
+            total = max(completed, int(result.get("sessions_started") or 0))
+            task_status[job_id]["status"] = "done"
+            task_status[job_id]["total"] = total
+            task_status[job_id]["done"] = completed
+            task_status[job_id]["skipped"] = (
+                int(result.get("daily_skipped") or 0)
+                + int(result.get("blocked_skipped") or 0)
+            )
+            tlog.set_progress(job_id, total, completed)
+            tlog.update_meta(job_id, {
+                **job["log_meta"],
+                "result": {
+                    "found": result.get("found", 0),
+                    "target_found_sessions": result.get("target_found_sessions", 0),
+                    "sessions_started": result.get("sessions_started", 0),
+                    "checks_completed": completed,
+                    "daily_skipped": result.get("daily_skipped", 0),
+                    "busy_waited": result.get("busy_waited", 0),
+                    "views_sent": result.get("views_sent", 0),
+                    "views_failed": result.get("views_failed", 0),
+                    "stopped_early": result.get("stopped_early", False),
+                    "queue_waited_seconds": result.get("queue_waited_seconds", 0),
+                },
+            })
+            tlog.set_done(job_id)
+            if not future.done():
+                future.set_result(result)
+        except Exception as e:
+            task_status[job_id]["status"] = "error"
+            task_status[job_id]["error"] = str(e)
+            tlog.set_error(job_id, str(e))
+            if not future.done():
+                future.set_exception(e)
+            print(f"[SPONSORED ERROR] [{job_id}] {e}")
+        finally:
+            sponsored_queue.task_done()
+            async with sponsored_queue_lock:
+                if sponsored_queue.empty():
+                    sponsored_priority_gate.set()
+
+
 async def worker_loop():
     while True:
         # ── Tizim to'xtatilgan bo'lsa navbatdagi taskni olmay kutamiz ──────────
@@ -241,6 +323,11 @@ async def worker_loop():
             await asyncio.sleep(3)
 
         priority, ts, task = await task_queue.get()
+        while True:
+            await sponsored_priority_gate.wait()
+            async with priority_start_lock:
+                if sponsored_priority_gate.is_set():
+                    break
 
         task_id   = task["task_id"]
         service   = task["service"]
@@ -441,6 +528,11 @@ async def lifespan(app: FastAPI):
             task_status[t["task_id"]]["error"]  = "Server qayta ishga tushdi"
             tlog.set_error(t["task_id"], "Server qayta ishga tushdi")
         elif t["status"] == "queued":
+            if t["service"] == "sponsored_search":
+                task_status[t["task_id"]]["status"] = "error"
+                task_status[t["task_id"]]["error"] = "Server qayta ishga tushdi"
+                tlog.set_error(t["task_id"], "Server qayta ishga tushdi")
+                continue
             meta = json.loads(t.get("task_meta") or "{}")
             await task_queue.put((t["priority"], 0, {
                 "task_id":   t["task_id"],
@@ -451,6 +543,7 @@ async def lifespan(app: FastAPI):
             }))
 
     loop = asyncio.get_event_loop()
+    loop.create_task(sponsored_worker_loop())
     loop.create_task(worker_loop())
     loop.create_task(flood_release_loop())
     yield
@@ -666,6 +759,378 @@ async def create_shares_task(
     return await _create_task("shares", req, key_context["priority"], key_context["api_key"])
 
 
+async def _execute_sponsored_search(
+    req: SponsoredSearchRequest,
+    search_key: str,
+    channel_username: str,
+    queue_waited_seconds: float = 0,
+    task_id: str | None = None,
+):
+    """Queue worker ichida sponsored qidiruvni bajaradi."""
+    keyword = search_key
+
+    sessions = session_store.get_active_sessions()
+    if not sessions:
+        raise HTTPException(status_code=409, detail="DB da active session topilmadi")
+
+    errors: list[dict] = []
+    sponsored_results: dict[tuple[str, int], dict] = {}
+    checked = 0
+    session_results: dict[str, dict] = {}
+    state_lock = asyncio.Lock()
+    stop_event = asyncio.Event()
+    searches_started = 0
+    daily_skipped = 0
+    blocked_skipped = 0
+    busy_waited = 0
+    target_found_sessions = 0
+    stopped_early = False
+    worker_tasks: list[asyncio.Task] = []
+    candidates: list[tuple[dict, str, asyncio.Lock]] = []
+
+    def new_session_result(session_key: str) -> dict:
+        return session_results.setdefault(session_key, {
+            "session": session_key,
+            "account": "",
+            "checks": 0,
+            "rounds_with_results": 0,
+            "found_keys": set(),
+            "found_ads": {},
+            "views_sent": 0,
+            "views_failed": 0,
+            "view_errors": [],
+            "stopped_early": False,
+            "errors": [],
+        })
+
+    for session in sessions:
+        session_key = session_store.get_session_key(session)
+        if not session_key or session_store.is_blocked(session):
+            blocked_skipped += 1
+            continue
+        if session_store.is_sponsored_keyword_done_today(session_key, keyword):
+            daily_skipped += 1
+            continue
+        candidates.append((session, session_key, await get_lock(session)))
+    eligible_sessions = len(candidates)
+
+    async def search_one_session(
+        session: dict,
+        session_key: str,
+        account_lock: asyncio.Lock,
+    ) -> None:
+        nonlocal checked, searches_started, daily_skipped, busy_waited
+        nonlocal target_found_sessions, stopped_early
+
+        was_busy = account_lock.locked()
+        async with account_lock:
+            if stop_event.is_set():
+                return
+            if not session_store.claim_sponsored_keyword_today(session_key, keyword):
+                async with state_lock:
+                    daily_skipped += 1
+                return
+
+            session_result = new_session_result(session_key)
+            async with state_lock:
+                searches_started += 1
+                if was_busy:
+                    busy_waited += 1
+
+            result = await find_sponsored_peers(
+                session,
+                keyword,
+                1,
+                target_username=channel_username,
+            )
+
+        checked += 1
+        if task_id:
+            task_status[task_id]["done"] = checked
+            tlog.inc_done(task_id)
+        session_result["checks"] += 1
+        status = result.get("status", "skip")
+        if result.get("account"):
+            session_result["account"] = result["account"]
+        session_result["views_sent"] += int(result.get("views_sent") or 0)
+        session_result["views_failed"] += int(result.get("views_failed") or 0)
+        session_result["view_errors"].extend(result.get("view_errors") or [])
+
+        if status == "ok":
+            result_rows = result.get("rows", [])
+            if result_rows:
+                session_result["rounds_with_results"] += 1
+            for row in result_rows:
+                entity_key = (
+                    str(row.get("entity_type") or "other"),
+                    int(row.get("entity_id") or 0),
+                )
+                session_result["found_keys"].add(entity_key)
+                session_result["found_ads"][entity_key] = {
+                    "name": row.get("name") or "No name",
+                    "username": row.get("username") or "",
+                    "link": row.get("link") or "",
+                    "type": row.get("type") or row.get("entity_type") or "other",
+                    "target_match": bool(row.get("target_match")),
+                    "view_sent": bool(row.get("view_sent")),
+                }
+                sponsored_result = sponsored_results.setdefault(entity_key, {
+                    "row": row,
+                    "sessions": {},
+                    "sightings": 0,
+                    "queries": set(),
+                    "rounds": set(),
+                })
+                sponsored_result["sightings"] += 1
+                sponsored_result["queries"].add(row.get("query_used") or keyword)
+                sponsored_result["rounds"].add(1)
+                viewer = sponsored_result["sessions"].setdefault(session_key, {
+                    "session": session_key,
+                    "account": result.get("account") or row.get("account") or "",
+                    "sightings": 0,
+                    "rounds": set(),
+                })
+                viewer["sightings"] += 1
+                viewer["rounds"].add(1)
+
+            if any(bool(row.get("target_match")) for row in result_rows):
+                async with state_lock:
+                    target_found_sessions += 1
+                    if (
+                        target_found_sessions >= SPONSORED_TARGET_STOP_THRESHOLD
+                        and not stop_event.is_set()
+                    ):
+                        stopped_early = True
+                        stop_event.set()
+
+                if stop_event.is_set():
+                    current_task = asyncio.current_task()
+                    for task in worker_tasks:
+                        if task is not current_task and not task.done():
+                            task.cancel()
+            return
+
+        if status.startswith("flood:"):
+            try:
+                wait_seconds = int(status.split(":", 1)[1])
+            except (IndexError, ValueError):
+                wait_seconds = 300
+            session_store.mark_flood(session, wait_seconds)
+        elif status in ("banned", "auth"):
+            session_store.mark_banned(session)
+
+        error = {
+            "session": session_key,
+            "round": 1,
+            "status": status,
+            "error": result.get("error"),
+        }
+        errors.append(error)
+        session_result["errors"].append(error)
+
+    worker_count = min(req.parallel_sessions, req.accounts, len(candidates))
+
+    async def run_selected(
+        session: dict,
+        session_key: str,
+        account_lock: asyncio.Lock,
+    ) -> None:
+        try:
+            await search_one_session(session, session_key, account_lock)
+        except asyncio.CancelledError:
+            if session_key in session_results:
+                new_session_result(session_key)["stopped_early"] = True
+
+    while candidates and not stop_event.is_set() and searches_started < req.accounts:
+        candidates.sort(key=lambda item: item[2].locked())
+        slots = min(worker_count, req.accounts - searches_started)
+        batch = candidates[:slots]
+        del candidates[:slots]
+
+        if not batch:
+            break
+
+        worker_tasks = [
+            asyncio.create_task(run_selected(session, session_key, account_lock))
+            for session, session_key, account_lock in batch
+        ]
+        await asyncio.gather(*worker_tasks, return_exceptions=True)
+
+    serialized_session_results = []
+    for item in session_results.values():
+        found_count = len(item["found_keys"])
+        if item["stopped_early"]:
+            status = "stopped"
+        elif found_count:
+            status = "found"
+        elif item["errors"]:
+            status = "error"
+        else:
+            status = "not_found"
+        serialized_session_results.append({
+            "session": item["session"],
+            "account": item["account"],
+            "status": status,
+            "checks": item["checks"],
+            "rounds_with_results": item["rounds_with_results"],
+            "found": found_count,
+            "found_ads": list(item["found_ads"].values()),
+            "views_sent": item["views_sent"],
+            "views_failed": item["views_failed"],
+            "view_errors": item["view_errors"],
+            "stopped_early": item["stopped_early"],
+            "errors": item["errors"],
+        })
+
+    sessions_found = sum(1 for item in serialized_session_results if item["status"] == "found")
+    sessions_not_found = sum(1 for item in serialized_session_results if item["status"] == "not_found")
+    sessions_failed = sum(1 for item in serialized_session_results if item["status"] == "error")
+    sessions_stopped = sum(1 for item in serialized_session_results if item["status"] == "stopped")
+    rows: list[dict] = []
+    for item in sponsored_results.values():
+        viewers = []
+        for viewer in item["sessions"].values():
+            viewers.append({
+                "session": viewer["session"],
+                "account": viewer["account"],
+                "sightings": viewer["sightings"],
+                "rounds": sorted(viewer["rounds"]),
+            })
+        rows.append({
+            **item["row"],
+            "sessions_count": len(viewers),
+            "sessions": viewers,
+            "sightings": item["sightings"],
+            "queries": sorted(item["queries"]),
+            "rounds_seen": sorted(item["rounds"]),
+        })
+    rows.sort(key=lambda item: (-item["sessions_count"], str(item.get("name") or "")))
+    views_sent = sum(item["views_sent"] for item in serialized_session_results)
+    views_failed = sum(item["views_failed"] for item in serialized_session_results)
+
+    message = f"{len(rows)} ta unique sponsored natija topildi"
+    if stopped_early:
+        message += (
+            f"; target {target_found_sessions} ta sessionda topildi va qidiruv to'xtatildi"
+        )
+
+    return {
+        "message": message,
+        "search_key": search_key,
+        "keyword": keyword,
+        "channel_username": channel_username,
+        "search_method": "contacts.getSponsoredPeers",
+        "view_method": "messages.viewSponsoredMessage",
+        "view_rule": "non_matching_sponsored_only",
+        "explicit_view_sent": views_sent > 0,
+        "views_sent": views_sent,
+        "views_failed": views_failed,
+        "rounds": 1,
+        "daily_keyword_rule": "one_keyword_per_session_per_day",
+        "daily_skipped": daily_skipped,
+        "blocked_skipped": blocked_skipped,
+        "busy_waited": busy_waited,
+        "target_found_sessions": target_found_sessions,
+        "target_stop_threshold": SPONSORED_TARGET_STOP_THRESHOLD,
+        "stopped_early": stopped_early,
+        "sessions_requested": req.accounts,
+        "sessions_available": len(sessions),
+        "sessions_eligible": eligible_sessions,
+        "sessions_started": searches_started,
+        "parallel_sessions": worker_count,
+        "queue_priority": SPONSORED_QUEUE_PRIORITY,
+        "queue_waited_seconds": round(queue_waited_seconds, 3),
+        "sessions_found": sessions_found,
+        "sessions_not_found": sessions_not_found,
+        "sessions_failed": sessions_failed,
+        "sessions_stopped": sessions_stopped,
+        "session_results": serialized_session_results,
+        "checks_completed": checked,
+        "found": len(rows),
+        "results": rows,
+        "errors": errors[:50],
+    }
+
+
+@app.post("/sponsored/search")
+@limiter.limit("10/minute")
+async def search_sponsored(
+    request: Request,
+    req: SponsoredSearchRequest,
+    key_context: dict = Depends(validate_user_api_key),
+):
+    """Sponsored qidiruvni doimiy yuqori-prioritet queue ga qo'yadi."""
+    search_key = " ".join(req.search_key.split())
+    if not search_key:
+        raise HTTPException(status_code=400, detail="Qidiruv key bo'sh bo'lmasligi kerak")
+
+    raw_username = req.channel_username.strip()
+    raw_username = re.sub(r"^https?://(?:www\.)?t\.me/", "", raw_username, flags=re.IGNORECASE)
+    channel_username = raw_username.lstrip("@").split("/", 1)[0].strip()
+    if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", channel_username):
+        raise HTTPException(
+            status_code=400,
+            detail="Kanal username noto'g'ri. @kanal yoki https://t.me/kanal formatida kiriting",
+        )
+
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    queued_at = time.time()
+    task_id = str(uuid.uuid4())
+    api_key = key_context["api_key"]
+    log_meta = {
+        "search_key": search_key,
+        "channel_username": channel_username,
+        "accounts": req.accounts,
+        "parallel_sessions": req.parallel_sessions,
+        "target_stop_threshold": SPONSORED_TARGET_STOP_THRESHOLD,
+    }
+    task_status[task_id] = {
+        "task_id": task_id,
+        "api_key": api_key,
+        "status": "queued",
+        "service": "sponsored_search",
+        "post_link": f"https://t.me/{channel_username}",
+        "priority": SPONSORED_QUEUE_PRIORITY,
+        "total": 0,
+        "done": 0,
+        "skipped": 0,
+        "flooded": 0,
+        "banned_count": 0,
+        "error": None,
+    }
+    tlog.create(
+        task_id,
+        api_key,
+        "sponsored_search",
+        f"https://t.me/{channel_username}",
+        SPONSORED_QUEUE_PRIORITY,
+        meta=log_meta,
+    )
+
+    async with priority_start_lock:
+        async with sponsored_queue_lock:
+            sponsored_priority_gate.clear()
+            await sponsored_queue.put((
+                SPONSORED_QUEUE_PRIORITY,
+                queued_at,
+                task_id,
+                {
+                    "future": future,
+                    "req": req,
+                    "search_key": search_key,
+                    "channel_username": channel_username,
+                    "log_meta": log_meta,
+                },
+            ))
+
+    print(
+        f"[SPONSORED QUEUED] [{task_id}] priority={SPONSORED_QUEUE_PRIORITY} | "
+        f"keyword={search_key} | waiting={sponsored_queue.qsize()}"
+    )
+    return await asyncio.shield(future)
+
+
 @app.get("/status/{task_id}", response_model=StatusResponse)
 async def get_status(
     task_id: str,
@@ -700,7 +1165,14 @@ async def list_tasks(
 
 @app.get("/queue")
 async def queue_info(_: dict = Depends(get_current_user)):
-    return {"waiting": task_queue.qsize()}
+    normal_waiting = task_queue.qsize()
+    sponsored_waiting = sponsored_queue.qsize()
+    return {
+        "waiting": normal_waiting + sponsored_waiting,
+        "normal_waiting": normal_waiting,
+        "sponsored_waiting": sponsored_waiting,
+        "sponsored_has_priority": not sponsored_priority_gate.is_set(),
+    }
 
 
 @app.get("/locks")
@@ -1457,7 +1929,10 @@ async def admin_system_status(_: dict = Depends(require_admin)):
         "recent_errors": len(_cb_errors),
         "cb_threshold":  CB_THRESHOLD,
         "cb_window_sec": CB_WINDOW,
-        "queue_size":    task_queue.qsize(),
+        "queue_size":    task_queue.qsize() + sponsored_queue.qsize(),
+        "normal_queue_size": task_queue.qsize(),
+        "sponsored_queue_size": sponsored_queue.qsize(),
+        "sponsored_has_priority": not sponsored_priority_gate.is_set(),
         "parallel_accounts": settings_store.get_parallel_accounts(DEFAULT_PARALLEL_ACCOUNTS),
         "parallel_accounts_default": DEFAULT_PARALLEL_ACCOUNTS,
     }
@@ -1494,7 +1969,7 @@ async def admin_resume_system(_: dict = Depends(require_admin)):
     return {
         "message":   "Tizim qayta ishga tushirildi. Tasklar davom etadi.",
         "was_paused": was_paused,
-        "queue_size": task_queue.qsize(),
+        "queue_size": task_queue.qsize() + sponsored_queue.qsize(),
     }
 
 
@@ -1515,6 +1990,9 @@ async def root():
             "GET  /tasks":          "Barcha tasklarning tarixi (DB)",
             "GET  /queue":          "Navbat uzunligi",
             "GET  /locks":          "Akkaunt holati",
+        },
+        "sponsored": {
+            "POST /sponsored/search": "Telegram qidiruvidagi sponsored/reklama natijalarini topish",
         },
         "admin (X-Token kerak)": {
             "POST   /admin/keys":        "API key yaratish",

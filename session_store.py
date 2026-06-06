@@ -181,7 +181,7 @@ def is_done_ever(session_key: str, post_link: str, service: str) -> bool:
         )
 
 
-def mark_done_today(session_key: str, post_link: str, service: str) -> None:
+def claim_done_today(session_key: str, post_link: str, service: str) -> bool:
     """Yuborilganini qayd qiladi (duplicate bo'lsa — indsilently skip)."""
     today = _today()
     with SessionLocal() as db:
@@ -193,11 +193,34 @@ def mark_done_today(session_key: str, post_link: str, service: str) -> None:
         ))
         try:
             db.commit()
+            return True
         except IntegrityError:
             db.rollback()
+            return False
 
 
 # ─── STATISTIKA ───────────────────────────────────────────────────────────────
+
+def mark_done_today(session_key: str, post_link: str, service: str) -> None:
+    """Yuborilganini qayd qiladi (duplicate bo'lsa silently skip)."""
+    claim_done_today(session_key, post_link, service)
+
+
+def claim_sponsored_keyword_today(session_key: str, keyword: str) -> bool:
+    """Bitta session uchun keyword qidiruvini bugunga atomik band qiladi."""
+    normalized_keyword = normalize_sponsored_keyword(keyword)
+    return claim_done_today(session_key, normalized_keyword, "sponsored_search")
+
+
+def is_sponsored_keyword_done_today(session_key: str, keyword: str) -> bool:
+    """Session bu keywordni bugun qidirgan bo'lsa True qaytaradi."""
+    normalized_keyword = normalize_sponsored_keyword(keyword)
+    return is_done_today(session_key, normalized_keyword, "sponsored_search")
+
+
+def normalize_sponsored_keyword(keyword: str) -> str:
+    return " ".join(keyword.split()).casefold()
+
 
 def get_active_sessions(limit: int | None = None) -> list[dict]:
     """Tasklarda ishlatiladigan active Telegram sessionlarni DB dan qaytaradi."""

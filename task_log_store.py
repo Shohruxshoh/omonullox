@@ -74,6 +74,25 @@ def inc_done(task_id: str, amount: int = 1) -> None:
             db.commit()
 
 
+def set_progress(task_id: str, total: int, done: int) -> None:
+    """Task total/done qiymatlarini aniq yangilaydi."""
+    with _db() as db:
+        log = db.get(TaskLog, task_id)
+        if log:
+            log.total = max(0, total)
+            log.done = max(0, min(done, log.total))
+            db.commit()
+
+
+def update_meta(task_id: str, meta: dict) -> None:
+    """Task meta JSON qiymatini yangilaydi."""
+    with _db() as db:
+        log = db.get(TaskLog, task_id)
+        if log:
+            log.task_meta = json.dumps(meta)
+            db.commit()
+
+
 def set_done(task_id: str) -> None:
     """Task muvaffaqiyatli tugaganida chaqiriladi."""
     with _db() as db:
