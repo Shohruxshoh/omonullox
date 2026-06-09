@@ -286,13 +286,20 @@ function bindSessions() {
 
   $("#session-block-check-form").addEventListener("submit", async (event) => {
     event.preventDefault();
+    showSessionBlockCheckStatus("Tekshiruv boshlandi. Bo'sh sessionlar Telegram orqali tekshirilmoqda...", "running");
     await withButton($("#session-block-check-submit"), "Tekshirilmoqda...", async () => {
-      const data = await api("/admin/sessions/check-recent", {
-        method: "POST",
-        json: { limit: Number($("#session-block-check-limit").value) },
-      });
-      showSessionResult(data);
-      await loadSessionStats();
+      try {
+        const data = await api("/admin/sessions/check-recent", {
+          method: "POST",
+          json: { limit: Number($("#session-block-check-limit").value) },
+        });
+        renderSessionBlockCheckResult(data);
+        showSessionResult(data);
+        await loadSessionStats();
+      } catch (error) {
+        showSessionBlockCheckStatus(`Tekshiruv bajarilmadi: ${error.message}`, "error");
+        throw error;
+      }
     });
   });
 
@@ -679,6 +686,26 @@ async function sessionUpload(button, url, formData = null) {
 
 function showSessionResult(data) {
   showJsonResult(data, $("#session-result"));
+}
+
+function showSessionBlockCheckStatus(message, stateName = "") {
+  const container = $("#session-block-check-status");
+  container.hidden = false;
+  container.className = `session-check-status ${stateName}`.trim();
+  container.textContent = message;
+}
+
+function renderSessionBlockCheckResult(data) {
+  const message = data.message || "Session tekshiruvi tugadi.";
+  const summary = [
+    `Tekshirildi: ${Number(data.checked || 0)}/${Number(data.requested || 0)}`,
+    `Active: ${Number(data.active || 0)}`,
+    `Bloklangan: ${Number(data.blocked || 0)}`,
+    `Flood: ${Number(data.flooded || 0)}`,
+    `Aniqlanmadi: ${Number(data.failed || 0)}`,
+    `Bandligi sabab o'tkazildi: ${Number(data.busy_skipped || 0)}`,
+  ].join(" | ");
+  showSessionBlockCheckStatus(`${message}\n${summary}`, Number(data.failed || 0) ? "warning" : "success");
 }
 
 async function loadSystem(notify = false) {

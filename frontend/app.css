@@ -344,6 +344,33 @@ main {
   box-shadow: none;
 }
 
+.session-check-status {
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.session-check-status.running {
+  border-color: #d7a72f;
+  color: #765400;
+}
+
+.session-check-status.success {
+  border-color: #57a879;
+  color: #17633b;
+}
+
+.session-check-status.warning,
+.session-check-status.error {
+  border-color: #d46a6a;
+  color: var(--danger);
+}
+
 .panel-head {
   display: flex;
   align-items: flex-start;
