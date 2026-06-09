@@ -55,10 +55,11 @@ from post_services import (
     SERVICE_MAP,
     parse_post_link,
     check_reaction_available,
+    check_session_authorized,
     send_reactions_to_post,
     find_sponsored_peers,
 )
-from account_queue import get_lock, get_stats
+from account_queue import get_lock, get_stats, try_acquire_idle_lock
 import api_key_store as key_store
 import user_store as users
 import task_log_store as tlog
@@ -201,6 +202,10 @@ class RawSessionsRequest(BaseModel):
     api_hash: str = DEFAULT_SESSION_API_HASH
     update: bool = True
     default_status: Literal["active", "sleep"] = "active"
+
+
+class SessionBlockCheckRequest(BaseModel):
+    limit: int = Field(default=10, ge=1, le=1000)
 
 
 class SystemSettingsRequest(BaseModel):
@@ -381,6 +386,7 @@ async def worker_loop():
                             check_result = "skip"
                             continue
 
+                        session_store.mark_used(checker)
                         check_result = await check_reaction_available(checker, channel, msg_id, emoji)
                         print(f"[CHECK] [{task_id}] checker natija: {check_result}")
 
@@ -466,6 +472,7 @@ async def worker_loop():
                     account_lock = await get_lock(session)
                     async with sponsored_priority.normal_account_lock(account_lock):
                         await asyncio.sleep(random.uniform(0.1, 0.5))
+                        session_store.mark_used(session)
                         result = await action_func(session, channel, msg_id)
 
                         if result == "ok":
@@ -859,6 +866,7 @@ async def _execute_sponsored_search(
                 if was_busy:
                     busy_waited += 1
 
+            session_store.mark_used(session)
             result = await find_sponsored_peers(
                 session,
                 keyword,
@@ -1953,6 +1961,128 @@ async def admin_import_csv(
 # ADMIN — SESSION MONITORING & CIRCUIT BREAKER
 # ════════════════════════════════════════════════════════════════════════════
 
+@app.post("/admin/sessions/check-recent")
+async def admin_check_recent_sessions(
+    req: SessionBlockCheckRequest,
+    _: dict = Depends(require_admin),
+):
+    """
+    Oxirgi ishlatilgan active sessionlardan faqat hozir bo'shlarini tekshiradi.
+    Band sessionlar kutilmaydi; boshqa Telegram operatsiyalari bilan parallel ishlamaydi.
+    """
+    candidates = session_store.get_recent_active_sessions()
+    if not candidates:
+        return {
+            "message": "Oxirgi ishlatilgan active session topilmadi",
+            "requested": req.limit,
+            "checked": 0,
+            "busy_skipped": 0,
+            "active": 0,
+            "blocked": 0,
+            "flooded": 0,
+            "failed": 0,
+            "results": [],
+        }
+
+    candidate_index = 0
+    selected = 0
+    busy_skipped = 0
+    selection_lock = asyncio.Lock()
+    results: list[dict] = []
+
+    async def check_next_idle() -> None:
+        nonlocal candidate_index, selected, busy_skipped
+
+        while True:
+            session = None
+            account_lock = None
+
+            async with selection_lock:
+                if selected >= req.limit:
+                    return
+
+                while candidate_index < len(candidates):
+                    candidate = candidates[candidate_index]
+                    candidate_index += 1
+                    candidate_lock = await try_acquire_idle_lock(candidate)
+                    if candidate_lock is None:
+                        busy_skipped += 1
+                        continue
+
+                    session = candidate
+                    account_lock = candidate_lock
+                    selected += 1
+                    break
+
+            if session is None or account_lock is None:
+                return
+
+            session_key = session_store.get_session_key(session) or "unknown"
+            try:
+                try:
+                    check_result = await check_session_authorized(session)
+                except Exception as e:
+                    results.append({
+                        "session": session_key,
+                        "phone_num": session.get("number"),
+                        "last_used_at": session.get("last_used_at"),
+                        "status": "failed",
+                        "telegram_result": "error",
+                        "error": str(e),
+                    })
+                    continue
+
+                if check_result in ("banned", "auth"):
+                    session_store.mark_banned(session)
+                    status = "blocked"
+                elif check_result.startswith("flood:"):
+                    try:
+                        wait_seconds = int(check_result.split(":", 1)[1])
+                    except (IndexError, ValueError):
+                        wait_seconds = 300
+                    session_store.mark_flood(session, wait_seconds)
+                    status = "flooded"
+                elif check_result == "ok":
+                    status = "active"
+                else:
+                    status = "failed"
+
+                results.append({
+                    "session": session_key,
+                    "phone_num": session.get("number"),
+                    "last_used_at": session.get("last_used_at"),
+                    "status": status,
+                    "telegram_result": check_result,
+                })
+            finally:
+                account_lock.release()
+
+    worker_count = min(10, req.limit, len(candidates))
+    await asyncio.gather(*(check_next_idle() for _ in range(worker_count)))
+
+    active = sum(1 for item in results if item["status"] == "active")
+    blocked = sum(1 for item in results if item["status"] == "blocked")
+    flooded = sum(1 for item in results if item["status"] == "flooded")
+    failed = sum(1 for item in results if item["status"] == "failed")
+    checked = len(results)
+
+    return {
+        "message": (
+            f"{checked} ta bo'sh session tekshirildi: "
+            f"{active} active, {blocked} blocked, {flooded} flood, {failed} aniqlanmadi"
+        ),
+        "requested": req.limit,
+        "candidates": len(candidates),
+        "checked": checked,
+        "busy_skipped": busy_skipped,
+        "active": active,
+        "blocked": blocked,
+        "flooded": flooded,
+        "failed": failed,
+        "results": results,
+    }
+
+
 @app.get("/admin/sessions/stats")
 async def admin_session_stats(_: dict = Depends(require_admin)):
     """
@@ -2053,6 +2183,7 @@ async def root():
             "POST   /admin/sessions/import-csv":    "CSV fayldan DB ga yuklash",
             "POST   /admin/sessions/upload-folder": "Papkadan Redis ga yuklash",
             "POST   /admin/sessions/upload-db":     "DB dan Redis ga yuklash",
+            "POST   /admin/sessions/check-recent":  "Oxirgi ishlatilgan bo'sh sessionlarni blokka tekshirish",
             "DELETE /admin/sessions/clear-redis":   "Redis ni tozalash",
             "GET    /admin/sessions/stats":         "Session holat statistika",
             "GET    /admin/system/status":          "Tizim holati (circuit breaker)",

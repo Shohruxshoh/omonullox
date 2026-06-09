@@ -137,6 +137,7 @@ class TelegramSession(Base):
     flood_date       = Column(String(10),  nullable=True)   # YYYY-MM-DD
     pid_id           = Column(String(32),  nullable=True)
     date_last_online = Column(String(50),  nullable=True)
+    last_used_at     = Column(String(50),  nullable=True, index=True)
 
     def __repr__(self):
         return f"<TelegramSession id={self.id} phone={self.phone_num} status={self.is_working}>"

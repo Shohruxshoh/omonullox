@@ -40,6 +40,42 @@ class AccountLockTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(max_active, 1)
 
+    async def test_idle_lock_is_acquired_immediately(self):
+        session = {"uid": "idle-account"}
+
+        lock = await account_queue.try_acquire_idle_lock(session)
+
+        self.assertIsNotNone(lock)
+        self.assertTrue(lock.locked())
+        lock.release()
+
+    async def test_busy_lock_is_skipped_without_waiting(self):
+        session = {"uid": "busy-account"}
+        lock = await account_queue.get_lock(session)
+        await lock.acquire()
+
+        result = await asyncio.wait_for(
+            account_queue.try_acquire_idle_lock(session),
+            timeout=0.05,
+        )
+
+        self.assertIsNone(result)
+        lock.release()
+
+    async def test_idle_check_does_not_jump_a_waiting_operation(self):
+        session = {"uid": "queued-account"}
+        lock = await account_queue.get_lock(session)
+        await lock.acquire()
+        waiter = asyncio.create_task(lock.acquire())
+        await asyncio.sleep(0)
+        lock.release()
+
+        result = await account_queue.try_acquire_idle_lock(session)
+
+        self.assertIsNone(result)
+        await waiter
+        lock.release()
+
 
 class WorkerGuardTests(unittest.TestCase):
     def test_second_worker_is_rejected(self):

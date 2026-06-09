@@ -63,6 +63,21 @@ async def get_lock(session: dict) -> asyncio.Lock:
         return _account_locks[account_id]
 
 
+async def try_acquire_idle_lock(session: dict) -> asyncio.Lock | None:
+    """
+    Session ayni paytda bo'sh bo'lsa lockni darhol oladi.
+    Band sessionni kutmaydi va None qaytaradi.
+    """
+    lock = await get_lock(session)
+    waiters = getattr(lock, "_waiters", None)
+    if lock.locked() or any(not waiter.cancelled() for waiter in (waiters or ())):
+        return None
+
+    # A free asyncio lock is acquired without yielding to another coroutine.
+    await lock.acquire()
+    return lock
+
+
 def get_stats() -> dict:
     """
     Monitoring: nechta akkaunt hozir band / bo'sh.

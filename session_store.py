@@ -129,6 +129,15 @@ def is_blocked(session_data: dict) -> bool:
     return False
 
 
+def mark_used(session_data: dict) -> None:
+    """Session Telegram operatsiyasini boshlagan vaqtni qayd qiladi."""
+    with SessionLocal() as db:
+        row = _find_session(db, session_data)
+        if row:
+            row.last_used_at = _now()
+            db.commit()
+
+
 def release_expired_floods() -> int:
     """Muddati o'tgan flood bloklar ni 'active' ga o'tkazadi. Periodically chaqiriladi."""
     now = _now()
@@ -222,6 +231,20 @@ def normalize_sponsored_keyword(keyword: str) -> str:
     return " ".join(keyword.split()).casefold()
 
 
+def _to_session_dict(row: TelegramSession) -> dict:
+    return {
+        "uid":          row.uid,
+        "session":      row.hash_session,
+        "app_id":       int(row.api_id),
+        "app_hash":     row.api_hash,
+        "proxy":        None,
+        "number":       row.phone_num,
+        "user_id":      row.user_id,
+        "device":       row.phone_model,
+        "last_used_at": row.last_used_at,
+    }
+
+
 def get_active_sessions(limit: int | None = None) -> list[dict]:
     """Tasklarda ishlatiladigan active Telegram sessionlarni DB dan qaytaradi."""
     with SessionLocal() as db:
@@ -237,16 +260,35 @@ def get_active_sessions(limit: int | None = None) -> list[dict]:
     sessions: list[dict] = []
     for row in rows:
         try:
-            sessions.append({
-                "uid":      row.uid,
-                "session":  row.hash_session,
-                "app_id":   int(row.api_id),
-                "app_hash": row.api_hash,
-                "proxy":    None,
-                "number":   row.phone_num,
-                "user_id":  row.user_id,
-                "device":   row.phone_model,
-            })
+            sessions.append(_to_session_dict(row))
+        except Exception:
+            continue
+    return sessions
+
+
+def get_recent_active_sessions() -> list[dict]:
+    """
+    Active sessionlarni oxirgi ishlatilgan tartibda qaytaradi.
+    Hali dastur ishlatmagan sessionlar tekshiruvga kiritilmaydi.
+    """
+    with SessionLocal() as db:
+        rows = (
+            db.query(TelegramSession)
+            .filter(
+                TelegramSession.is_working == "active",
+                TelegramSession.last_used_at.is_not(None),
+            )
+            .order_by(
+                TelegramSession.last_used_at.desc(),
+                TelegramSession.id.desc(),
+            )
+            .all()
+        )
+
+    sessions: list[dict] = []
+    for row in rows:
+        try:
+            sessions.append(_to_session_dict(row))
         except Exception:
             continue
     return sessions

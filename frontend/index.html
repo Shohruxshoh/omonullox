@@ -473,6 +473,15 @@
                     <label class="check-field"><input id="session-db-active" type="checkbox" checked> Faqat active sessionlar</label>
                     <button id="session-db-submit" class="secondary-btn" type="submit">DB holatini tekshirish</button>
                   </form>
+                  <form id="session-block-check-form" class="subpanel stack">
+                    <h3>Telegram blok tekshiruvi</h3>
+                    <p>Oxirgi ishlatilgan sessionlardan faqat hozir bo'shlarini tekshiradi.</p>
+                    <label class="field">
+                      <span>Oxirgi nechta session</span>
+                      <input id="session-block-check-limit" type="number" value="10" min="1" max="1000" required>
+                    </label>
+                    <button id="session-block-check-submit" class="secondary-btn" type="submit">Blok holatini tekshirish</button>
+                  </form>
                 </div>
               </div>
               <div id="session-result" class="result-box" hidden></div>

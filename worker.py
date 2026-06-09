@@ -15,6 +15,7 @@ from redis_main import RedisSessionManager
 from post_services import SERVICE_MAP, parse_post_link
 from account_queue import get_lock
 from worker_guard import acquire_worker_lock, release_worker_lock, WorkerAlreadyRunningError
+import session_store
 
 REDIS_KEY = "telegram:sessions:full"
 REDIS_URL = "redis://localhost:6379"
@@ -81,6 +82,7 @@ async def main():
             account_lock = await get_lock(session)
             async with account_lock:
                 await asyncio.sleep(random.uniform(0.1, 0.5))
+                session_store.mark_used(session)
                 await action_func(session, channel, msg_id)
                 done += 1
                 if done % 50 == 0 or done == total:

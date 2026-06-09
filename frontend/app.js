@@ -284,6 +284,18 @@ function bindSessions() {
     });
   });
 
+  $("#session-block-check-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await withButton($("#session-block-check-submit"), "Tekshirilmoqda...", async () => {
+      const data = await api("/admin/sessions/check-recent", {
+        method: "POST",
+        json: { limit: Number($("#session-block-check-limit").value) },
+      });
+      showSessionResult(data);
+      await loadSessionStats();
+    });
+  });
+
   $("#clear-redis-btn").addEventListener("click", async () => {
     if (!(await confirmAction("Redisdagi barcha sessionlar o'chiriladi. Bu amalni qaytarib bo'lmaydi."))) return;
     await withButton($("#clear-redis-btn"), "Tozalanmoqda...", async () => {

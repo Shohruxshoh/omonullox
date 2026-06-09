@@ -59,6 +59,34 @@ def create_client(session_data: dict) -> TelegramClient:
 
 # ─── VIEWS ───────────────────────────────────────────────────────────────────
 
+async def check_session_authorized(session_data: dict) -> str:
+    """Session Telegram tomonidan bloklangan yoki bekor qilinganini tekshiradi."""
+    client = create_client(session_data)
+    try:
+        await client.connect()
+        if not await client.is_user_authorized():
+            return "auth"
+        await client.get_me()
+        return "ok"
+
+    except errors.FloodWaitError as e:
+        return f"flood:{e.seconds}"
+
+    except (errors.UserDeactivatedBanError, errors.UserDeactivatedError,
+            errors.InputUserDeactivatedError):
+        return "banned"
+
+    except (errors.AuthKeyError, errors.AuthKeyUnregisteredError,
+            errors.SessionRevokedError, errors.PhoneNumberBannedError):
+        return "auth"
+
+    except Exception:
+        return "skip"
+
+    finally:
+        await client.disconnect()
+
+
 async def send_views_to_post(session_data: dict, channel, msg_id: int) -> str:
     """Bitta postga view yuboradi. Status qaytaradi: ok/flood:N/banned/auth/skip."""
     client = create_client(session_data)
