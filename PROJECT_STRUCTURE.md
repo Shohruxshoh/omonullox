@@ -440,26 +440,26 @@ docker compose run --rm uploader
 ```nginx
 server {
     listen 80;
-    server_name yourdomain.com;
+    server_name omonullox.vipads.uz;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl;
-    server_name yourdomain.com;
+    server_name omonullox.vipads.uz;
 
-    ssl_certificate     /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/omonullox.vipads.uz/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/omonullox.vipads.uz/privkey.pem;
 
     location / {
-        proxy_pass         http://127.0.0.1:8000;
+        proxy_pass         http://127.0.0.1:20202;
         proxy_set_header   Host $host;
         proxy_set_header   X-Real-IP $remote_addr;
         proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto $scheme;
 
         # Katta so'rovlar uchun (CSV import)
-        client_max_body_size 50M;
+        client_max_body_size 100M;
     }
 }
 ```
@@ -471,9 +471,38 @@ server {
 
 ### SSL sertifikat (Let's Encrypt)
 
+Cloudflare ishlatilsa, sertifikat olishdan oldin `omonullox` DNS recordini
+vaqtincha **DNS only** holatiga o'tkazing. Sertifikat olingach proxy holatini
+qayta yoqib, SSL/TLS rejimini **Full (strict)** qiling.
+
 ```bash
 apt install certbot python3-certbot-nginx
-certbot --nginx -d yourdomain.com
+
+# 1. Sertifikat hali yo'q paytda bootstrap HTTP conf
+mkdir -p /var/www/certbot
+cp deploy/nginx/omonullox.vipads.uz.bootstrap.conf /etc/nginx/sites-available/omonullox.vipads.uz
+ln -sf /etc/nginx/sites-available/omonullox.vipads.uz /etc/nginx/sites-enabled/omonullox.vipads.uz
+nginx -t && systemctl reload nginx
+
+# 2. Yangi domen uchun sertifikat
+certbot certonly --webroot -w /var/www/certbot -d omonullox.vipads.uz
+
+# 3. Production HTTPS conf
+cp deploy/nginx/omonullox.vipads.uz.conf /etc/nginx/sites-available/omonullox.vipads.uz
+nginx -t && systemctl reload nginx
+```
+
+Docker `standalone-proxy` ishlatilsa:
+
+```bash
+# Bootstrap HTTP Nginx
+NGINX_CONF_DIR=./nginx/bootstrap docker compose --profile standalone-proxy up -d nginx
+
+# Sertifikatni named volume ichiga olish
+docker compose run --rm certbot certonly --webroot -w /var/www/certbot -d omonullox.vipads.uz
+
+# Production HTTPS Nginx
+docker compose --profile standalone-proxy up -d --force-recreate nginx
 ```
 
 ---

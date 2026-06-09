@@ -38,6 +38,7 @@ import re
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException, Header, Depends, Query, UploadFile, File, Request
@@ -65,6 +66,8 @@ import session_store
 import settings_store
 from database import SessionLocal
 from models import TelegramSession
+from queue_control import SponsoredPriorityController, pop_first_unlocked
+from worker_guard import acquire_worker_lock, release_worker_lock
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 REDIS_KEY         = os.environ.get("REDIS_KEY", "telegram:sessions:full")
@@ -82,11 +85,19 @@ DEFAULT_SESSION_API_HASH = "b18441a1ff607e10a989891a5462e627"
 # ─── GLOBALS ─────────────────────────────────────────────────────────────────
 task_queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
 sponsored_queue: asyncio.PriorityQueue = asyncio.PriorityQueue()
-sponsored_priority_gate = asyncio.Event()
-sponsored_priority_gate.set()
-sponsored_queue_lock = asyncio.Lock()
-priority_start_lock = asyncio.Lock()
+sponsored_priority = SponsoredPriorityController()
 task_status: dict[str, dict] = {}
+
+
+def _queue_timestamp(created_at: str | None = None) -> float:
+    if not created_at:
+        return time.time()
+    try:
+        return datetime.fromisoformat(created_at).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _get_real_ip(request: Request) -> str:
     """Nginx/Cloudflare ortida haqiqiy IP ni oladi."""
     forwarded = request.headers.get("X-Forwarded-For")
@@ -261,6 +272,9 @@ async def flood_release_loop():
 async def sponsored_worker_loop():
     """Sponsored qidiruvlarni FIFO bajaradi va oddiy tasklardan ustun qo'yadi."""
     while True:
+        while IS_PAUSED:
+            await asyncio.sleep(3)
+
         _, queued_at, job_id, job = await sponsored_queue.get()
         future: asyncio.Future = job["future"]
         try:
@@ -311,9 +325,7 @@ async def sponsored_worker_loop():
             print(f"[SPONSORED ERROR] [{job_id}] {e}")
         finally:
             sponsored_queue.task_done()
-            async with sponsored_queue_lock:
-                if sponsored_queue.empty():
-                    sponsored_priority_gate.set()
+            await sponsored_priority.sponsored_finished(sponsored_queue)
 
 
 async def worker_loop():
@@ -322,14 +334,8 @@ async def worker_loop():
         while IS_PAUSED:
             await asyncio.sleep(3)
 
-        priority, ts, task = await task_queue.get()
-        while True:
-            await sponsored_priority_gate.wait()
-            async with priority_start_lock:
-                if sponsored_priority_gate.is_set():
-                    break
+        priority, ts, task_id, task = await sponsored_priority.get_normal_item(task_queue)
 
-        task_id   = task["task_id"]
         service   = task["service"]
         post_link = task["post_link"]
         limit     = task.get("accounts")
@@ -369,21 +375,25 @@ async def worker_loop():
                 for _ in range(min(MAX_CHECKERS, len(sessions))):
                     checker = sessions.pop(0)
                     checker_key = session_store.get_session_key(checker)
-                    if checker_key and session_store.is_done_ever(checker_key, post_link, service):
-                        check_result = "skip"
-                        continue
+                    checker_lock = await get_lock(checker)
+                    async with sponsored_priority.normal_account_lock(checker_lock):
+                        if checker_key and session_store.is_done_ever(checker_key, post_link, service):
+                            check_result = "skip"
+                            continue
 
-                    check_result = await check_reaction_available(checker, channel, msg_id, emoji)
-                    print(f"[CHECK] [{task_id}] checker natija: {check_result}")
+                        check_result = await check_reaction_available(checker, channel, msg_id, emoji)
+                        print(f"[CHECK] [{task_id}] checker natija: {check_result}")
 
-                    if check_result in ("banned", "auth"):
-                        session_store.mark_banned(checker)
-                    elif check_result and check_result.startswith("flood:"):
-                        try:
-                            wait_s = int(check_result.split(":")[1])
-                        except (IndexError, ValueError):
-                            wait_s = 300
-                        session_store.mark_flood(checker, wait_s)
+                        if check_result == "ok" and checker_key:
+                            session_store.mark_done_today(checker_key, post_link, service)
+                        elif check_result in ("banned", "auth"):
+                            session_store.mark_banned(checker)
+                        elif check_result and check_result.startswith("flood:"):
+                            try:
+                                wait_s = int(check_result.split(":")[1])
+                            except (IndexError, ValueError):
+                                wait_s = 300
+                            session_store.mark_flood(checker, wait_s)
 
                     # Aniq natija — davom etish yoki to'xtatish
                     if check_result in ("ok", "reaction_not_allowed"):
@@ -424,8 +434,6 @@ async def worker_loop():
             if checker_done:
                 task_status[task_id]["done"] += 1
                 tlog.inc_done(task_id)
-                if checker_key:
-                    session_store.mark_done_today(checker_key, post_link, service)
             parallel_accounts = settings_store.get_parallel_accounts(DEFAULT_PARALLEL_ACCOUNTS)
             task_status[task_id]["parallel_accounts"] = parallel_accounts
             semaphore = asyncio.Semaphore(parallel_accounts)
@@ -456,7 +464,7 @@ async def worker_loop():
                 async with semaphore:
                     # ── Per-account lock ──────────────────────────────────────
                     account_lock = await get_lock(session)
-                    async with account_lock:
+                    async with sponsored_priority.normal_account_lock(account_lock):
                         await asyncio.sleep(random.uniform(0.1, 0.5))
                         result = await action_func(session, channel, msg_id)
 
@@ -502,6 +510,10 @@ async def worker_loop():
 # ─── LIFESPAN ────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Queue'lar process xotirasida. Ikkinchi app process alohida worker
+    # ochib yubormasligi uchun bu DB connection lockni shutdowngacha ushlaydi.
+    singleton_connection = acquire_worker_lock()
+
     key_store.init_db()
     users.init_db()
     settings_store.init_defaults(DEFAULT_PARALLEL_ACCOUNTS)
@@ -534,7 +546,7 @@ async def lifespan(app: FastAPI):
                 tlog.set_error(t["task_id"], "Server qayta ishga tushdi")
                 continue
             meta = json.loads(t.get("task_meta") or "{}")
-            await task_queue.put((t["priority"], 0, {
+            await task_queue.put((t["priority"], _queue_timestamp(t.get("created_at")), t["task_id"], {
                 "task_id":   t["task_id"],
                 "service":   t["service"],
                 "post_link": t["post_link"],
@@ -542,11 +554,18 @@ async def lifespan(app: FastAPI):
                 "emoji":     meta.get("emoji", "👍"),
             }))
 
-    loop = asyncio.get_event_loop()
-    loop.create_task(sponsored_worker_loop())
-    loop.create_task(worker_loop())
-    loop.create_task(flood_release_loop())
-    yield
+    background_tasks = [
+        asyncio.create_task(sponsored_worker_loop()),
+        asyncio.create_task(worker_loop()),
+        asyncio.create_task(flood_release_loop()),
+    ]
+    try:
+        yield
+    finally:
+        for task in background_tasks:
+            task.cancel()
+        await asyncio.gather(*background_tasks, return_exceptions=True)
+        release_worker_lock(singleton_connection)
 
 
 # ─── APP ─────────────────────────────────────────────────────────────────────
@@ -666,7 +685,7 @@ async def _create_task(
     tlog.create(task_id, api_key, service, req.post_link, priority,
                 meta={"accounts": req.accounts})
 
-    await task_queue.put((priority, arrived_at, {
+    await task_queue.put((priority, arrived_at, task_id, {
         "task_id":   task_id,
         "service":   service,
         "post_link": req.post_link,
@@ -730,7 +749,7 @@ async def create_reactions_task(
     tlog.create(task_id, api_key, "reactions", req.post_link, priority,
                 meta={"accounts": req.accounts, "emoji": req.reaction})
 
-    await task_queue.put((priority, arrived_at, {
+    await task_queue.put((priority, arrived_at, task_id, {
         "task_id":   task_id,
         "service":   "reactions",
         "post_link": req.post_link,
@@ -785,7 +804,7 @@ async def _execute_sponsored_search(
     busy_waited = 0
     target_found_sessions = 0
     stopped_early = False
-    worker_tasks: list[asyncio.Task] = []
+    worker_tasks: set[asyncio.Task] = set()
     candidates: list[tuple[dict, str, asyncio.Lock]] = []
 
     def new_session_result(session_key: str) -> dict:
@@ -824,6 +843,9 @@ async def _execute_sponsored_search(
 
         was_busy = account_lock.locked()
         async with account_lock:
+            while IS_PAUSED:
+                await asyncio.sleep(2)
+
             if stop_event.is_set():
                 return
             if not session_store.claim_sponsored_keyword_today(session_key, keyword):
@@ -941,19 +963,46 @@ async def _execute_sponsored_search(
             if session_key in session_results:
                 new_session_result(session_key)["stopped_early"] = True
 
-    while candidates and not stop_event.is_set() and searches_started < req.accounts:
-        candidates.sort(key=lambda item: item[2].locked())
-        slots = min(worker_count, req.accounts - searches_started)
-        batch = candidates[:slots]
-        del candidates[:slots]
+    scheduled = 0
+    while (
+        (candidates or worker_tasks)
+        and not stop_event.is_set()
+        and (scheduled < req.accounts or worker_tasks)
+    ):
+        while (
+            candidates
+            and len(worker_tasks) < worker_count
+            and scheduled < req.accounts
+            and not stop_event.is_set()
+        ):
+            candidate = pop_first_unlocked(candidates)
+            if candidate is None:
+                break
 
-        if not batch:
+            session, session_key, account_lock = candidate
+            worker_tasks.add(asyncio.create_task(
+                run_selected(session, session_key, account_lock)
+            ))
+            scheduled += 1
+
+        if not worker_tasks:
+            if candidates and scheduled < req.accounts:
+                await asyncio.sleep(0.05)
+                continue
             break
 
-        worker_tasks = [
-            asyncio.create_task(run_selected(session, session_key, account_lock))
-            for session, session_key, account_lock in batch
-        ]
+        done_tasks, pending_tasks = await asyncio.wait(
+            worker_tasks,
+            timeout=0.05 if candidates and scheduled < req.accounts else None,
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        worker_tasks = set(pending_tasks)
+        if done_tasks:
+            await asyncio.gather(*done_tasks, return_exceptions=True)
+
+    if worker_tasks:
+        for task in worker_tasks:
+            task.cancel()
         await asyncio.gather(*worker_tasks, return_exceptions=True)
 
     serialized_session_results = []
@@ -1108,21 +1157,18 @@ async def search_sponsored(
         meta=log_meta,
     )
 
-    async with priority_start_lock:
-        async with sponsored_queue_lock:
-            sponsored_priority_gate.clear()
-            await sponsored_queue.put((
-                SPONSORED_QUEUE_PRIORITY,
-                queued_at,
-                task_id,
-                {
-                    "future": future,
-                    "req": req,
-                    "search_key": search_key,
-                    "channel_username": channel_username,
-                    "log_meta": log_meta,
-                },
-            ))
+    await sponsored_priority.enqueue_sponsored(sponsored_queue, (
+        SPONSORED_QUEUE_PRIORITY,
+        queued_at,
+        task_id,
+        {
+            "future": future,
+            "req": req,
+            "search_key": search_key,
+            "channel_username": channel_username,
+            "log_meta": log_meta,
+        },
+    ))
 
     print(
         f"[SPONSORED QUEUED] [{task_id}] priority={SPONSORED_QUEUE_PRIORITY} | "
@@ -1171,7 +1217,7 @@ async def queue_info(_: dict = Depends(get_current_user)):
         "waiting": normal_waiting + sponsored_waiting,
         "normal_waiting": normal_waiting,
         "sponsored_waiting": sponsored_waiting,
-        "sponsored_has_priority": not sponsored_priority_gate.is_set(),
+        "sponsored_has_priority": sponsored_priority.sponsored_active,
     }
 
 
@@ -1932,7 +1978,7 @@ async def admin_system_status(_: dict = Depends(require_admin)):
         "queue_size":    task_queue.qsize() + sponsored_queue.qsize(),
         "normal_queue_size": task_queue.qsize(),
         "sponsored_queue_size": sponsored_queue.qsize(),
-        "sponsored_has_priority": not sponsored_priority_gate.is_set(),
+        "sponsored_has_priority": sponsored_priority.sponsored_active,
         "parallel_accounts": settings_store.get_parallel_accounts(DEFAULT_PARALLEL_ACCOUNTS),
         "parallel_accounts_default": DEFAULT_PARALLEL_ACCOUNTS,
     }

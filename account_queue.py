@@ -13,6 +13,7 @@ KAFOLAT:
 """
 
 import asyncio
+import hashlib
 
 # ─── GLOBAL LOCK REGISTRY ────────────────────────────────────────────────────
 # key   = account_id (telefon raqam yoki sessiya identifikatori)
@@ -24,14 +25,22 @@ _registry_lock = asyncio.Lock()   # _account_locks dict ni thread-safe yangilash
 def _get_account_id(session: dict) -> str:
     """
     Akkaunt uchun noyob identifikator qaytaradi.
-    'number' maydoni bo'lsa — ishlatadi (eng ishonchli).
-    Yo'q bo'lsa — session string ning birinchi 32 belgi.
+    uid/user_id/telefon mavjud bo'lsa ishlatadi.
+    Yo'q bo'lsa to'liq session string hashidan foydalanadi.
     """
-    number = session.get("number") or session.get("phone")
-    if number:
-        return str(number).strip()
-    # fallback: session string identifikatori
-    return str(session.get("session", "unknown"))[:32]
+    account_id = (
+        session.get("uid") or
+        session.get("user_id") or
+        session.get("number") or
+        session.get("phone")
+    )
+    if account_id:
+        return str(account_id).strip()
+
+    session_value = str(session.get("session") or "")
+    if session_value:
+        return hashlib.sha256(session_value.encode()).hexdigest()
+    return "unknown"
 
 
 async def get_lock(session: dict) -> asyncio.Lock:

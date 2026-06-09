@@ -41,7 +41,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-postapi}:${POSTGRES_PASSWORD:-secret123}@postgres:5432/${POSTGRES_DB:-postapi}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
     ports:
-      - "127.0.0.1:20201:8000"
+      - "127.0.0.1:20202:8000"
     volumes:
       - ./sessions:/app/sessions:ro
     depends_on:
@@ -62,7 +62,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ${NGINX_CONF_DIR:-./nginx/conf.d}:/etc/nginx/conf.d:ro
       - letsencrypt:/etc/letsencrypt:ro
       - certbot_www:/var/www/certbot:ro
     depends_on:

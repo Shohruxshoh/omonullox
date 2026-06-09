@@ -14,6 +14,7 @@ import time
 from redis_main import RedisSessionManager
 from post_services import SERVICE_MAP, parse_post_link
 from account_queue import get_lock
+from worker_guard import acquire_worker_lock, release_worker_lock, WorkerAlreadyRunningError
 
 REDIS_KEY = "telegram:sessions:full"
 REDIS_URL = "redis://localhost:6379"
@@ -94,8 +95,18 @@ async def main():
     await redis_manager.close()
 
 
+async def guarded_main():
+    singleton_connection = acquire_worker_lock()
+    try:
+        await main()
+    finally:
+        release_worker_lock(singleton_connection)
+
+
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(guarded_main())
+    except WorkerAlreadyRunningError as e:
+        raise SystemExit(f"Worker ishga tushmadi: {e}") from e
     except KeyboardInterrupt:
         print("\n⛔ To'xtatildi")
