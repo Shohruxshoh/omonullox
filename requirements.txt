@@ -1,4 +1,4 @@
-telethon
+telethon==1.42.0
 redis[asyncio]
 fastapi
 uvicorn
